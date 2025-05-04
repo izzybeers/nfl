@@ -1,0 +1,46 @@
+---
+title: "get_player_list"
+date: '`r Sys.time()`'
+output: html_document
+---
+
+
+```{r}
+library(stringr)
+library(dplyr)
+source('nfl_functions.R')
+player_df = rbind()
+
+year_cutoff = 2020 #how far back do we want to go when we pull each player's historical data
+  
+for (let in LETTERS)
+{
+  print(let)
+  player_list = get_html_content(url = paste0("https://www.pro-football-reference.com/players/",let))
+  if (any(str_detect(player_list %>% html_nodes("p") %>% as.character(), 'block traffic')))
+  {
+    print("Site detected scraping. Try again in one hour.")
+    Sys.sleep(60)
+    player_list = get_html_content(url = paste0("https://www.pro-football-reference.com/players/",let))
+  }
+  
+  player_list_content = player_list %>% html_nodes(".section_content#div_players")
+  total_info = player_list_content %>% html_nodes("p") %>% html_text(trim = TRUE)
+  years = str_extract(total_info, '[0-9]+-[0-9]+')
+  min_year = sapply(strsplit(years, "-"), function(x) x[1])
+  max_year = sapply(strsplit(years, "-"), function(x) x[2])
+  positions = gsub('\\(|\\)','',str_extract(total_info, "\\(.*\\)"))
+  names = gsub(' \\(', '', str_extract(total_info, '.+\\('))
+  links = player_list_content %>% html_nodes("a") %>% html_attr("href")
+  
+  df = data.frame(names, positions, min_year, max_year,links) %>% mutate(min_year = as.numeric(min_year), max_year = as.numeric(max_year))
+  
+  df_filtered = df %>% filter(max_year >= year_cutoff)
+  
+  player_df = rbind(player_df, df)
+  wait = runif(1,5,10)
+  Sys.sleep(wait)
+}
+```
+
+
