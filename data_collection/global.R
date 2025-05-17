@@ -3,69 +3,27 @@ library(httr)
 library(RSelenium)
 library(wdman)
 library(chromote)
+library(stringr)
+library(dplyr)
 
 options(chromote.headless = "new")
 Sys.setenv(CHROMOTE_CHROME = "/Users/izzybeers/chrome-headless-shell/mac-136.0.7103.49/chrome-headless-shell-mac-x64/chrome-headless-shell")
 
-get_html = function(url, max_retries = 3, wait_between_retries = 5) {
-  retries = 0
-  
-  while (retries < max_retries) {
-    tryCatch({
-      # Attempt to navigate to the URL
-      b$Page$navigate(url)
-      Sys.sleep(5)
-      
-      # Attempt to evaluate the page content
-      result = b$Runtime$evaluate("document.documentElement.outerHTML")
-      
-      # Check if result is valid
-      if (!is.null(result) && !is.null(result[["result"]][["value"]])) {
-        html_content <- result[["result"]][["value"]]
-        html_doc <- read_html(html_content)
-        return(html_doc)  # Return HTML document if successful
-      }
+team_lookup_table = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vT9_LcNO2d8L5kzbJQZZti9kxfAZRFRAl2oJz5WlpusfvL1txbkc8OU6BSlB54TA9HCBHRlIxi9MpuT/pub?gid=0&single=true&output=csv')
 
-    }, error = function(e) {
-      # Handle any errors by retrying
-      retries = retries + 1
-      Sys.sleep(wait_between_retries)
-      print(paste("Retry:", retries))
-      
-      # Reset ChromoteSession if necessary
-      if (retries < max_retries) {
-        b = ChromoteSession$new()
-        print("new session created")
-      }
-    })
-    
-   
-    library(splashr)
-    splash <- start_splash()
-    html <- render_html(splash, "https://example.com")
-    stop_splash(splash)
-    
-  }
-
-    
-    if(retries == max_retries)
-    {
-      print(paste(max_retries, "tries unsuccessful"))
-    }
-}
 
 get_html_content = function(url, max_retries = 3) {
   retries = 0
  
 for (i in 1:max_retries) {
-  try({
+  try_result = try({
     session <- session(url, user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/113.0.0.0 Safari/537.36"))
     page <- read_html(session)
     return(page)  # Success — exit function
   }, silent = TRUE)
   
   # If the above failed, try with Chromote
-  try({
+  try_result = try({
     message(paste("Retry", i, "- falling back to Chromote"))
     b <- ChromoteSession$new()
     b$Page$navigate(url)
@@ -73,203 +31,492 @@ for (i in 1:max_retries) {
     html_content <- result$result$value
     page <- read_html(html_content)
     return(page)  # Success — exit function
-  }, silent = TRUE)
-  
-  wait_between_retries = runif(1,5,10)
-  
-  print(paste('waiting', wait_between_retries, 'seconds'))
-  Sys.sleep(wait_between_retries)
+  })
+
+  if (!is.null(try_result)) return(try_result)
+      
+    # Only wait if both methods failed
+    wait_time <- runif(1, 2, 4)
+    message(paste("Both methods failed. Waiting", round(wait_time, 1), "seconds before retrying..."))
+    Sys.sleep(wait_time)
 }
+
 
 stop(paste(max_retries, "attempts failed to retrieve", url))
 
 }
 
-
-
+conditionally_remove = function(df, col_list) #normally, to remove a columnm you would do %>% select(-col_name), but if that col name doesn't exist, it gives error. so this conditionally removes if it exists.
+{
+  for (c in col_list)
+  {
+     if (c %in% colnames(df))
+     {
+       df = df %>% select(-!!sym(c))
+     }
+  }
+  return(df)
+}
 
 get_player_bio = function(player_row)
 {
 
   url = paste0("https://www.pro-football-reference.com",player_row$links)
-  html_response = get_html(url = url)
+  html_response = get_html_content(url = url)
   if (any(str_detect(html_response %>% html_nodes("p") %>% as.character(), 'block traffic')))
   {
     print("Site detected scraping. Try again in one hour.")
     Sys.sleep(65)
+    html_response = get_html_content(url = url)
   }
   
   #player bio:
   info = html_response %>% html_nodes("p") %>% html_text(trim = TRUE)
-  if (length(info) == 0)
-  {
-    b = ChromoteSession$new()
-    html_response = get_html(url = url)
-    info = html_response %>% html_nodes("p") %>% html_text(trim = TRUE)
-  }
   
   
   name = player_row$names
   if(length(info) > 0)
   {
     height_weight = info[str_detect(info, '[0-9]lb|[0-9]cm|[0-9]kg')]
-    height_string = str_extract(height_weight,"[0-9]+-[0-9]*")
-    ft = sapply(strsplit(height_string, '-'), function(x) x[1])
-    inch = sapply(strsplit(height_string, '-'), function(x) x[2])
-    height = 12*as.numeric(ft)+as.numeric(inch)
-    weight = gsub('lb','',str_extract(height_weight, "[0-9]+lb"))
+    if(length(height_weight) == 0)
+    {
+      height = NA
+      weight = NA
+    } else{
+      height_string = str_extract(height_weight,"[0-9]+-[0-9]*")
+      ft = sapply(strsplit(height_string, '-'), function(x) x[1])
+      inch = sapply(strsplit(height_string, '-'), function(x) x[2])
+      height = 12*as.numeric(ft)+as.numeric(inch)
+      weight = gsub('lb','',str_extract(height_weight, "[0-9]+lb"))
+    }
     college = trimws(gsub('College:|\\n|\\t|\\(College Stats\\)','',info[str_detect(info,'College')]), which = "both")
-    college = ifelse(!is.null(college) && length(college) >= 1, gsub("\u00A0", "", college)[1], NA) #remove the invisible space at the end
+    if(length(college) > 0)
+    {
+      college = ifelse(!is.null(college) && length(college) >= 1, gsub("\u00A0", "", college)[1], NA) #remove the invisible space at the end
+    } else {
+      college = NA
+    }
+    birthday_text = info[str_detect(info, 'Born:')]
+    if(length(birthday_text) > 0)
+    {
+       birth_year = str_extract(birthday_text, '[0-9]{4}')
+       birth_day = str_pad(gsub(',', '', str_extract(birthday_text, '[0-9]{1,2},')), width = 2, side = 'left', pad = '0')
+       birth_month = str_extract(birthday_text, paste0(month.name, collapse =  '|')) %>% match(month.name)
+       birthday = paste0(birth_year,'-',birth_month,'-',birth_day)
+    } else{
+      birthday = NA
+    }
+    draft = info[str_detect(info, 'Draft:')]
+    if(length(draft) > 0)
+    {
+      draft_round = draft %>% str_extract('[0-9]+.*round') %>% str_extract('[0-9]+') %>% as.numeric()
+      draft_pick = draft %>% str_extract('\\([0-9]+.*overall') %>% str_extract('[0-9]+') %>% as.numeric()
+      year_drafted = draft %>% str_extract('[0-9]+ NFL Draft') %>% str_extract('[0-9]+') %>% as.numeric()
+      t = draft %>% str_extract(paste(team_lookup_table$FullName, collapse = '|'))
+      original_draft_team = unique(team_lookup_table$Team[team_lookup_table$FullName == t])
+    } else {
+      draft_round = NA
+      draft_pick = NA
+      year_drafted = NA
+      original_draft_team = NA
+    }
+    
   } else {
+    print('no info')
     height = NA
     weight = NA
     college = NA
+    draft_round = NA
+    draft_pick = NA
+    year_drafted = NA
+    birthday = NA
+    original_draft_team = NA
   }
-  return(data.frame(name, height, weight, college))
+  return(data.frame(name, birthday, height, weight, college, year_drafted, draft_round, draft_pick, original_draft_team))
 }
 
-get_game_log = function(player_row, yr)
+get_game_log = function(player_row, yr, wk = NULL, gamelog_table_tag, gamelog_advanced_table_tag, gamelog_advanced_passing_table_tag)
 {
   url = paste0("https://www.pro-football-reference.com",gsub('.htm','',player_row$links),'/gamelog/',yr,'/')
-  game_log_html = get_html(url)
+  url_advanced = paste0(url, 'advanced')
+  game_log_html = get_html_content(url)
+  Sys.sleep(1)
+  game_log_html_advanced = get_html_content(url_advanced)
   
   if (any(str_detect(game_log_html %>% html_nodes("p") %>% as.character(), 'block traffic')))
   {
     print("Site detected scraping. Try again in one hour.")
-    Sys.sleep(65)
-    game_log_html = get_html(url)
+    Sys.sleep(65*60)
+    game_log_html = get_html_content(url)
+    Sys.sleep(1)
+    game_log_html_advanced = get_html_content(url_advanced)
+  }
+  if (any(str_detect(game_log_html_advanced %>% html_nodes("p") %>% as.character(), 'block traffic')))
+  {
+    print("Site detected scraping. Try again in one hour.")
+    Sys.sleep(65*60)
+    game_log_html_advanced = get_html_content(url_advanced)
   }
   
-  df = data.frame(week_num = game_log_html %>% html_nodes(xpath = paste0('//tbody/tr[not(ancestor::tfoot)]/td[@data-stat="week_num"]')) %>% html_text(trim = TRUE) %>% as.numeric())
-  if (nrow(df) > 0)
+
+  html_path_table = paste0('table#', gamelog_table_tag)
+  html_path_advanced_table = paste0('table#', gamelog_advanced_table_tag)
+  html_path_advanced_table_passing = paste0('table#', gamelog_advanced_passing_table_tag)
+  
+  gamelog_table_node = game_log_html %>% html_node(html_path_table)
+  if (!inherits(gamelog_table_node, "xml_missing"))
   {
-    col_num = 2
-    for (metric in c("game_date", "age", "team", "game_location", "opp", "game_result", "gs", "targets", "rec", "rec_yds",
-                     "rec_td", "offense", "off_pct"))
+    gamelog_table = gamelog_table_node %>% html_table(fill = TRUE)
+  } else {
+    gamelog_table = NULL
+  }
+  
+  gamelog_advanced_table_node = game_log_html_advanced %>% html_node(html_path_advanced_table)
+  if (!inherits(gamelog_advanced_table_node, "xml_missing"))
+  {
+    gamelog_advanced_table = gamelog_advanced_table_node %>% html_table(fill = TRUE)
+  } else{
+    gamelog_advanced_table = NULL
+  }
+  
+  gamelog_advanced_passing_table_node = game_log_html_advanced %>% html_node(html_path_advanced_table_passing)
+  if (!inherits(gamelog_advanced_passing_table_node, "xml_missing"))
+  {
+    gamelog_advanced_passing_table = gamelog_advanced_passing_table_node %>% html_table(fill = TRUE)
+  } else{
+    gamelog_advanced_passing_table = NULL
+  }
+  
+  
+  
+  if(!is.null(gamelog_table) && nrow(gamelog_table) > 0 && ('Receiving' %in% colnames(gamelog_table) | 'Rushing' %in% colnames(gamelog_table) | 'Passing' %in% colnames(gamelog_table)))
+  {
+    colnames(gamelog_table) = ifelse(colnames(gamelog_table) != '',
+                                     paste(colnames(gamelog_table), gamelog_table[1,], sep = '_'),
+                                     gamelog_table[1,])
+    gamelog_table = gamelog_table[2:nrow(gamelog_table),]
+    colnames(gamelog_table)[which(colnames(gamelog_table) %in% c('', 'NA'))] = 'Game_Location'
+    if(sum(colnames(gamelog_table) == 'Passing_Yds') == 2)
     {
-      if(length(game_log_html %>% html_nodes(paste0('td[data-stat="reason"]')) %>% html_text(trim = TRUE)>0))
-      {
-        inactive_week_nums = game_log_html %>%
-          html_nodes(xpath = '//tr[td[@data-stat="reason"]]/td[@data-stat="week_num"]') %>%
-          html_text(trim = TRUE)
-        
-        
-      } else {
-        inactive_week_nums = NULL
-      }
-      active_index = which(!df$week_num %in% inactive_week_nums)
-      started =  game_log_html %>% html_nodes(xpath = paste0('//tbody/tr[not(ancestor::tfoot)]/td[@data-stat="gs"]')) %>% html_text(trim = TRUE)
-      
-      x = rep(NA, nrow(df))
-      #the //tbody/tr[not(ancestor::tfoot)] part requires it to not be a "footer" (the grand totals row)
-      values = game_log_html %>% html_nodes(xpath = paste0('//tbody/tr[not(ancestor::tfoot)]/td[@data-stat="',metric,'"]')) %>% html_text(trim = TRUE)
-      if (length(values) == length(x))
-      {
-        df = cbind(df, values)
-      } else if (length(values) > 0){
-        x[active_index] = values
-        df = cbind(df, x)
-      } else {
-        df = cbind(df, x)
-      }
-      colnames(df)[col_num] = metric
-      col_num = col_num + 1
+      colnames(gamelog_table)[which(colnames(gamelog_table) == 'Passing_Yds')] = c('Passing_Yds', 'Sacked_Yds')
     }
     
-    df = df %>% mutate(
-      Season = yr,
-      Month = game_date %>% substring(6,7),
-      day_of_week = weekdays(as.Date(game_date)),
-      game_location = ifelse(game_location == '@', 'Away', 'Home'),
-      week_num = as.numeric(week_num),
-      age = as.numeric(age),
-      targets = as.numeric(targets),
-      rec = as.numeric(rec),
-      Receiving_Yards = as.numeric(rec_yds),
-      rec_td = as.numeric(rec_td),
-      offense = as.numeric(offense),
-      off_pct = (gsub('%','',off_pct) %>% as.numeric())/100,
-      snaps_played = round(offense*off_pct)
-    ) %>% filter(week_num <=18) %>% arrange(week_num) %>% select(-rec_yds)
+    if('Snap Counts_OffSnp' %in% colnames(gamelog_table) & 'Snap Counts_Off%' %in% colnames(gamelog_table))
+    {
+      gamelog_table = gamelog_table %>% mutate(Total_Team_Off_Snaps = as.numeric(`Snap Counts_OffSnp`)/(as.numeric(`Snap Counts_Off%`)/100))
+    }
+    if('Snap Counts_STSnp' %in% colnames(gamelog_table) & 'Snap Counts_ST%' %in% colnames(gamelog_table))
+    {
+      gamelog_table = gamelog_table %>% mutate(Total_Team_ST_Snaps = as.numeric(`Snap Counts_STSnp`)/(as.numeric(`Snap Counts_ST%`)/100))
+    }
     
-    return(df)
-  } else {
+    gamelog_table = gamelog_table[,-which(str_detect(colnames(gamelog_table), '\\/|%'))] %>% conditionally_remove(c('Rk', 'Gcar'))
+    if (any(str_detect(colnames(gamelog_table), 'Receiving') | str_detect(colnames(gamelog_table), 'Rushing') |  str_detect(colnames(gamelog_table), 'Passing')))
+    {
+      if(!is.null(gamelog_advanced_table) && nrow(gamelog_advanced_table) > 0)
+      {
+      
+        colnames(gamelog_advanced_table) = ifelse(colnames(gamelog_advanced_table) != '',
+                                         paste(colnames(gamelog_advanced_table), gamelog_advanced_table[1,], sep = '_'),
+                                         gamelog_advanced_table[1,])
+        gamelog_advanced_table = gamelog_advanced_table[2:nrow(gamelog_advanced_table),]
+        colnames(gamelog_advanced_table)[which(colnames(gamelog_advanced_table) == '')] = 'Game_Location'
+        gamelog_advanced_table = gamelog_advanced_table[,-which(str_detect(colnames(gamelog_advanced_table), '\\/|%'))] %>% conditionally_remove(c('Rk', 'Gcar', 'Snap Counts_DefSnp')) %>%
+          filter(GS %in% c('*', ''))
+        
+        if(!is.null(gamelog_advanced_passing_table) && nrow(gamelog_advanced_passing_table) > 0)
+        {
+          colnames(gamelog_advanced_passing_table) =  ifelse(colnames(gamelog_advanced_passing_table) != '',
+                                                          paste(colnames(gamelog_advanced_passing_table), gamelog_advanced_passing_table[1,], sep = '_'),
+                                                          gamelog_advanced_passing_table[1,])
+          gamelog_advanced_passing_table = gamelog_advanced_passing_table[2:nrow(gamelog_advanced_passing_table),]
+          colnames(gamelog_advanced_passing_table)[which(colnames(gamelog_advanced_passing_table) == '')] = 'Game_Location'
+          gamelog_advanced_passing_table = gamelog_advanced_passing_table[,-which(str_detect(colnames(gamelog_advanced_passing_table), '\\/|%'))] %>% conditionally_remove(c('Rk', 'Gcar', 'Week', 'Date', 'Team', 'Game_Location', 'Opp', 'Result', 'GS', 'Snap Counts_DefSnp')) %>%
+            filter(Gtm != '' & !is.na(Gtm))
+          
+          gamelog_advanced_table = gamelog_advanced_table %>% left_join(gamelog_advanced_passing_table, by = 'Gtm')
+        }
+        
+        shared_columns = intersect(colnames(gamelog_table), colnames(gamelog_advanced_table))
+        
+        gamelog_table = gamelog_table %>% filter(Week != '' & !is.na(Week)) %>% left_join(gamelog_advanced_table %>% select(-!!setdiff(shared_columns,'Gtm')), join_by('Gtm'))
+        
+        
+      }
+      
+      gamelog_table = gamelog_table[,which(colnames(gamelog_table) != 'NA')]
+      gamelog_table = gamelog_table %>%
+        mutate(Active = ifelse(str_detect(GS, '[A-Za-z]+'), 0, 1),
+               GS = ifelse(is.na(GS), NA, ifelse(GS == '*', 1, 0))) %>%
+        filter(!is.na(Week) & Week != '')
+      
+      if('total_broken_tackles' %in% colnames(gamelog_table))
+      {
+        gamelog_table$total_broken_tackles[gamelog_table$Active == 0] = NA
+      }
+      
+      gamelog_table[gamelog_table == 'Inactive' | gamelog_table == 'Did Not Play' | gamelog_table == 'COVID-19 List'] = NA
+      touchdown_colnames = colnames(gamelog_table)[str_detect(colnames(gamelog_table), 'TD')]
+      if (nrow(gamelog_table) > 1)
+      {
+        gamelog_table[,which(!(colnames(gamelog_table) %in% c('Date', 'Team', 'Game_Location', 'Opp', 'Result', 'GS')))] = sapply(gamelog_table[,which(!(colnames(gamelog_table) %in% c('Date', 'Team', 'Game_Location', 'Opp', 'Result', 'GS')))], as.numeric)
+        gamelog_table[,touchdown_colnames] = sapply(gamelog_table[,touchdown_colnames], as.numeric)
+        
+      } else {
+        gamelog_table[,which(!(colnames(gamelog_table) %in% c('Date', 'Team', 'Game_Location', 'Opp', 'Result', 'GS')))] = data.frame(lapply(gamelog_table[,which(!(colnames(gamelog_table) %in% c('Date', 'Team', 'Game_Location', 'Opp', 'Result', 'GS')))], as.numeric))
+        gamelog_table[,touchdown_colnames] = data.frame(lapply(gamelog_table[,touchdown_colnames], as.numeric))
+      }
+      gamelog_table = gamelog_table %>% mutate(Total_Touchdowns = rowSums(across(all_of(touchdown_colnames)), na.rm = TRUE))
+  
+      colnames(gamelog_table)[which(colnames(gamelog_table) == 'Fumbles_Fmb')] = 'Fumbles'
+      colnames(gamelog_table)[which(colnames(gamelog_table) == 'Fumbles_FL')] = 'Fumbles_Lost'
+      colnames(gamelog_table)[which(colnames(gamelog_table) == 'Fumbles_FF')] = 'Fumbles_Forced'
+      colnames(gamelog_table)[which(colnames(gamelog_table) == 'Fumbles_FR')] = 'Fumbles_Recovered'
+      colnames(gamelog_table)[which(colnames(gamelog_table) =='Fumbles_FRTD')] = 'Fumbles_TD'
+    
+      gamelog_table = gamelog_table %>% mutate(Season = yr, Name = player_row$names, Position = player_row$positions, player_id = player_row$player_id)
+      if('Date' %in% colnames(gamelog_table))
+      {
+        gamelog_table = gamelog_table %>% mutate(Month = Date %>% substring(6,7),
+                                                 day_of_week = weekdays(as.Date(Date)))
+      }
+      if('Game_Location' %in% colnames(gamelog_table))
+      {
+        gamelog_table = gamelog_table %>% mutate(Game_Location = ifelse(Game_Location == '@', 'Away', 'Home'))
+      }
+      if('Result' %in% colnames(gamelog_table))
+      {
+        gamelog_table = gamelog_table %>% mutate(Win = sapply(strsplit(Result, ','), function(x) ifelse(x[1] == 'W', 1, 0)),
+                                                 Differential = sapply(strsplit(gsub(' \\(OT\\)', '', Result), ','), function(x) sapply(strsplit(x[2],'-'), function(y) as.numeric(y[1])-as.numeric(y[2]))))
+      }
+      
+      gamelog_table = gamelog_table %>% conditionally_remove("Result")
+      
+      if(!is.null(wk))
+      {
+        gamelog_table =  gamelog_table %>% filter(Week == wk)
+      }
+      
+      return(gamelog_table %>% filter(Week != '' & !is.na(Week)))
+    } else {
+      return(NULL)
+    }
+  } else{
     return(NULL)
   }
 }
   
-  get_per_game_stats = function(log)
-  {
-    df = log %>%
-      #work on this:
-      mutate(Games_Started_Season = ifelse(cumsum(!is.na(gs)) == 1, NA, (cumsum(replace(gs,is.na(gs),'') == "*")-(replace(gs,is.na(gs),'') == "*"))),
-             Cumulative_Targets = ifelse(cumsum(!is.na(gs)) == 1, NA, cumsum(replace(targets, is.na(targets),0)) - replace(targets, is.na(targets),0)),
-             Cumulative_Rec = ifelse(cumsum(!is.na(gs)) == 1, NA, cumsum(replace(rec, is.na(rec),0)) - replace(rec, is.na(rec),0)),
-             Cumulative_Rec_Yards = ifelse(cumsum(!is.na(gs)) == 1, NA, cumsum(replace(Receiving_Yards, is.na(Receiving_Yards),0)) - replace(Receiving_Yards, is.na(Receiving_Yards),0)),
-             Cumulative_Receiving_TDs = ifelse(cumsum(!is.na(gs)) == 1, NA, cumsum(replace(rec_td, is.na(rec_td),0))- replace(rec_td, is.na(rec_td),0)),
-             Cumulative_Team_Snaps = ifelse(cumsum(!is.na(gs)) == 1, NA, cumsum(replace(offense, is.na(offense), 0)) - replace(offense, is.na(offense), 0)),
-             Cumulative_Snaps_Played = round(ifelse(cumsum(!is.na(gs)) == 1, NA, cumsum(replace(offense*off_pct, is.na(offense*off_pct), 0)) - replace(offense*off_pct, is.na(offense*off_pct), 0))),
-             Cumulative_Games_Active = ifelse(week_num == 1, NA, cumsum(!is.na(gs))-!is.na(gs)),
-             Cumulative_Games_Inactive = ifelse(week_num == 1, NA, cumsum(is.na(gs))-is.na(gs)),
-             Receiving_Yards_Lag1 = lag(Receiving_Yards, n = 1, order_by = week_num),
-             Receiving_Yards_Lag2 = lag(Receiving_Yards, n = 2, order_by = week_num),
-             Receiving_Yards_Lag3 = lag(Receiving_Yards, n = 3, order_by = week_num)
-      )
-    
-    df = df %>% mutate(
-        Percent_Games_Started_Season = ifelse(is.na(Cumulative_Games_Active) | Cumulative_Games_Active == 0, NA, Games_Started_Season/Cumulative_Games_Active),
-        Avg_Targets_Per_Game = ifelse(is.na(Cumulative_Games_Active) | Cumulative_Games_Active == 0, NA, Cumulative_Targets/Cumulative_Games_Active),
-        Avg_Rec_Per_Game = ifelse(is.na(Cumulative_Games_Active) | Cumulative_Games_Active == 0, NA, Cumulative_Rec/Cumulative_Games_Active),
-        Avg_Rec_Per_Target = ifelse(is.na(Cumulative_Targets) | Cumulative_Targets == 0, NA, Cumulative_Rec/Cumulative_Targets),
-        Avg_Receiving_Yards_Per_Game = ifelse(is.na(Cumulative_Games_Active) | Cumulative_Games_Active == 0, NA, Cumulative_Rec_Yards/Cumulative_Games_Active),
-        Avg_Receiving_Yards_Per_Target = ifelse(is.na(Cumulative_Targets) | Cumulative_Targets == 0, NA, Cumulative_Rec_Yards/Cumulative_Targets),
-        Avg_Receiving_TDs_Per_Game = ifelse(is.na(Cumulative_Games_Active) | Cumulative_Games_Active == 0, NA, Cumulative_Receiving_TDs/Cumulative_Games_Active),
-        Avg_Percent_Snaps_Played = ifelse(is.na(Cumulative_Team_Snaps), NA, Cumulative_Snaps_Played/Cumulative_Team_Snaps), #Cumulative_Team_Snaps already assumes active games
-      )
-    
-    return(df)
-  }
+# get_cumulatives = function(log, skip, team = c('Win', 'Differential'))
+# {
+#   for (c in setdiff(colnames(log), skip))
+#   {
+#     for (g )
+#     new_values_sum = as.numeric((cumsum(replace(log[,c], is.na(log[,c]),0)) - replace(log[,c], is.na(log[,c]),0))[,1])
+#     if(!(c %in% team))
+#     {
+#       new_values[which(cumsum(log$Active)<= 1)] = NA #first active game of season, or any inactive games before first active game, should not have any previous "player stats"
+#     } else {
+#       new_values[1] = NA #for team stats like win and differential, should just be NA for the first game since no previous stats
+#     }
+#     new_colname = paste0('Cumulative_Prior_',c)
+#     log[[new_colname]] = new_values
+#   }
+#   return(log)
+# }
 
 
 
-get_last_3_games = function(week_num, field_name, df, max_games = 5)
+get_cumulative = function(log, last3, skip, team = c('Win', 'Differential'))
 {
-  current_team = df$team[df$week_num == max(df$week_num)]
-  df = df %>% filter(team == current_team)
-  #try to look back to 3 previous active games, if available. But don't go back more than 5 weeks.
-  if(week_num > min(df$week_num))
+  for (c in setdiff(colnames(log), skip))
   {
-    num_active_games = df$Cumulative_Games_Active[week_num]
-    num_inactive_games = df$Cumulative_Games_Inactive[week_num]
-    
-    if(week_num <= min(df$week_num) + 3)
+    rows = rbind()
+    for (g in log$Gtm)
     {
-      window = df[which(df$week_num %in% (min(df$week_num):(week_num - 1))),] %>% data.frame()
-      num_games = sum(!is.na(window$gs))
-    } else {
-      big_window = df[df$week_num %in% (week_num-max_games):(week_num - 1),] %>% arrange(desc(week_num))
-      big_window = big_window %>% mutate(num_active_games = cumsum(!is.na(gs)))
-      latest_week_satisfying_num_active_games = ifelse(max(big_window$num_active_games) < 3,
-                                                       min(big_window$week_num),
-                                                       min(big_window$week_num[big_window$num_active_games==3]))
-      window = big_window %>% filter(week_num >= latest_week_satisfying_num_active_games) %>% arrange(week_num) %>% data.frame()
-      num_games = sum(!is.na(window$gs))
+      if(g == 1) #first game, no historical data, NA for everything
+      {
+        result_sum = NA
+        result_avg = NA
+        result_median = NA
+        result_min = NA
+        result_max = NA
+        result_sd = NA
+      } else { #not game #1
+          if(last3 == TRUE)
+          {
+            if (g <= 4) #if there's only been 3 or less previous games, just take them all
+            {
+              previous_games = log %>% filter(Gtm < g)
+            }
+            else if (c %in% team) #team-based stats don't rely on whether player was active
+            {
+              previous_games = log %>% filter(Gtm < g & Gtm >= (g-3))
+            } else { #out of the past 5 games, choose the most recent 3 where player was active.
+              num_active_games = 0 #counter
+              games_back = 3
+              while(num_active_games < 3 & games_back <= 5)
+              {
+                new_g = g - games_back
+                previous_games = log %>% filter(Gtm >= max(new_g,1) & Gtm < g)
+                num_active_games = sum(previous_games$Active)
+                if(num_active_games < 3)
+                {
+                  games_back = games_back + 1
+                }
+              }
+            }
+            
+          } else {
+            
+            if (c %in% team)
+            {
+              previous_games = log %>% filter(Gtm < g)
+            } else { #player stats depend on whether player was active
+              previous_games = log %>% filter(Gtm < g & Active == 1)
+            }
+            
+          }
+        
+        column_values = previous_games %>% select(!!sym(c)) %>% pull()
+        
+        if(any(!is.na(column_values)))   
+        {
+          result_sum = column_values %>% sum(na.rm = TRUE)
+          result_avg = column_values %>% mean(na.rm = TRUE)
+          result_median = column_values %>% median(na.rm = TRUE)
+          result_min = column_values %>% min(na.rm = TRUE)
+          result_max = column_values %>% max(na.rm = TRUE)
+          result_sd = column_values %>% sd(na.rm = TRUE)
+        } else {
+          result_sum = NA
+          result_avg = NA
+          result_median = NA
+          result_min = NA
+          result_max = NA
+          result_sd = NA
+        }
+      }
+    rows = rbind(rows, c(result_sum, result_avg, result_median, result_min, result_max, result_sd))
+
+    }
+  
+    rows = rows %>% data.frame()
+    colnames(rows) = paste0(ifelse(last3 == TRUE, 'Last3_',''), c('Cumulative_','Avg_','Median_','Min_','Max_','SD_'), c)
+    for (new_colname in colnames(rows))
+    {
+      vals = rows[,new_colname]
+      log[[new_colname]] = vals
     }
     
-    
-    if(num_games > 0)
-    {
-      return(median(as.numeric(window[,field_name]),na.rm = TRUE))
-    } else {
-      return (NA)
-    }
-    
-    
-    
-  } else {
-    return(NA)
   }
+
+    return(log)
+  
 }
+# get_per_game_stats = function(log)
+#   {
+#     df = log %>%
+#       mutate(Games_Active_Season=  cumsum(Active) - Active, #number of active games prior to this game
+#              Games_Started_Season = cumsum(GS) - GS, # number of games started prior to this game
+#              Cumulative_Receiving_Yards = get_cumulative_amount(Active, column = Receiving_Yds),
+#              Cumulative_Targets = get_cumulative_amount(Active, column = Receiving_Tgt),
+#              Cumulative_Rec = get_cumulative_amount(active, column = Receiving-Rec),
+#              Cumulative_TDs = get_cumulative_amount(Active, column = Total_Touchdowns),
+#              Cumulative_Snaps_Played = get_cumulative_amount(Active, column = snap_counts_offense),
+#              Cumulative_Kick_Returns =  get_cumulative_amount(Active, column = kick_ret),
+#              Cumulative_Fumbles = get_cumulative_amount(Active, column = fumbles),
+#              Cumulative_Fumbles_Lost = get_cumulative_amount(Active, column = fumbles_lost),
+#              Cumulative_Fumbles_Forced = get_cumulative_amount(Active, column = fumbles_forced),
+#              Cumulative_Fumbles_Rec = get_cumulative_amount(active, column = fumbles_rec),
+#              Cumulative_Fumbles_Rec_Yds = get_cumulative_amount(active, column = fumbles_rec_yds),
+#              Cumulative_Rush_Attempts = get_cumulative_amount(active, column = rush_att),
+#              Cumulative_Rush_First_Down = get_cumulative_amount(active, column = rush_first_down),
+#              Cumulative_Rush_Yds_Before_Contact = get_cumulative_amount(active, column =  rush_yds_before_contact),
+#              Cumulative_Rec_Air_Yards = get_cumulative_amount(active, column = rec_air_yds),
+#              Cumulative_Rec_YAC = get_cumulative_amount(active, column = rec_yac),
+#              Cumulative_Target_Depth = get_cumulative_amount(active, column = total_target_depth),
+#              Cumulative_Rush_Broken_Tackles = get_cumulative_amount(active, column = rush_broken_tackles),
+#              Cumulative_Rec_First_Down = get_cumulative_amount(active, column = rec_first_down),
+#              Cumulative_Rec_Drops = get_cumulative_amount(active, column = rec_drops),
+#              Cumulative_Target_Interceptions = get_cumulative_amount(active, column = rec_target_int),
+#              Cumulative_Kick_Returns =  get_cumulative_amount(active, column = kick_ret)
+#              
+#       )
+#     
+#     df = df %>% mutate(
+#         Percent_Games_Started_Season = ifelse(is.na(Cumulative_Games_Active) | Cumulative_Games_Active == 0, NA, Games_Started_Season/Cumulative_Games_Active),
+#         Avg_Targets_Per_Game = ifelse(is.na(Cumulative_Games_Active) | Cumulative_Games_Active == 0, NA, Cumulative_Targets/Cumulative_Games_Active),
+#         Avg_Rec_Per_Game = ifelse(is.na(Cumulative_Games_Active) | Cumulative_Games_Active == 0, NA, Cumulative_Rec/Cumulative_Games_Active),
+#         Avg_Rec_Per_Target = ifelse(is.na(Cumulative_Targets) | Cumulative_Targets == 0, NA, Cumulative_Rec/Cumulative_Targets),
+#         Avg_Receiving_Yards_Per_Game = ifelse(is.na(Cumulative_Games_Active) | Cumulative_Games_Active == 0, NA, Cumulative_Rec_Yards/Cumulative_Games_Active),
+#         Avg_Receiving_Yards_Per_Target = ifelse(is.na(Cumulative_Targets) | Cumulative_Targets == 0, NA, Cumulative_Rec_Yards/Cumulative_Targets),
+#         Avg_Receiving_TDs_Per_Game = ifelse(is.na(Cumulative_Games_Active) | Cumulative_Games_Active == 0, NA, Cumulative_Receiving_TDs/Cumulative_Games_Active),
+#         Avg_Percent_Snaps_Played = ifelse(is.na(Cumulative_Team_Snaps), NA, Cumulative_Snaps_Played/Cumulative_Team_Snaps), #Cumulative_Team_Snaps already assumes active games
+#       )
+#     
+#     return(df)
+#   }
+
+  get_last_3_games = function(week_num, field_name, df, max_games = 5, required_games = 3) {
+    df = df %>% arrange(week_num)
+    
+    # Only consider weeks before the target week
+    df_prior = df %>% filter(week_num < week_num)
+    
+    if (nrow(df_prior) == 0) return(NA)
+    
+    # Limit to max_games lookback
+    df_window = df_prior %>% tail(max_games)
+    
+    # Filter for games where player was active (non-NA in 'gs')
+    df_active = df_window %>% filter(!is.na(started))
+    
+    if (nrow(df_active) == 0) return(NA)
+    
+    # If fewer than required_games active, use however many we got
+    df_recent = df_active %>% tail(required_games)
+    
+    median(as.numeric(df_recent[[field_name]]), na.rm = TRUE)
+  }
+
+# get_last_3_games = function(week_num_html_tag, field_name, df, max_games = 5, team_html_tag)
+# {
+#   current_team = df$team[df$week_num_html_tag == max(df$week_num_html_tag)]
+#   df = df %>% filter(team_html_tag == current_team)
+#   #try to look back to 3 previous active games, if available. But don't go back more than 5 weeks.
+#   if(week_num > min(df$week_num))
+#   {
+#     num_active_games = df$Cumulative_Games_Active[week_num]
+#     num_inactive_games = df$Cumulative_Games_Inactive[week_num]
+#     
+#     if(week_num <= min(df$week_num) + 3)
+#     {
+#       window = df[which(df$week_num %in% (min(df$week_num):(week_num - 1))),] %>% data.frame()
+#       num_games = sum(!is.na(window$gs))
+#     } else {
+#       big_window = df[df$week_num %in% (week_num-max_games):(week_num - 1),] %>% arrange(desc(week_num))
+#       big_window = big_window %>% mutate(num_active_games = cumsum(!is.na(gs)))
+#       latest_week_satisfying_num_active_games = ifelse(max(big_window$num_active_games) < 3,
+#                                                        min(big_window$week_num),
+#                                                        min(big_window$week_num[big_window$num_active_games==3]))
+#       window = big_window %>% filter(week_num >= latest_week_satisfying_num_active_games) %>% arrange(week_num) %>% data.frame()
+#       num_games = sum(!is.na(window$gs))
+#     }
+#     
+#     
+#     if(num_games > 0)
+#     {
+#       return(median(as.numeric(window[,field_name]),na.rm = TRUE))
+#     } else {
+#       return (NA)
+#     }
+#     
+#     
+#     
+#   } else {
+#     return(NA)
+#   }
+# }
 
 add_players_performance_recent_years = function(df)
 {
@@ -313,7 +560,7 @@ get_team_stats_per_game = function(t, y) {
                                                                ifelse(t=='ten','oti',
                                                                       t))))))))
   #use the get_html function I defined above, and use for the below url.
-  doc = get_html(url = paste0("https://www.pro-football-reference.com/teams/",link_abbr,"/",y,".htm#all_games"))
+  doc = get_html_content(url = paste0("https://www.pro-football-reference.com/teams/",link_abbr,"/",y,".htm#all_games"))
   #in the source code for this link, find the week number, and see how the html is organized there. trim = TRUE means that the html tags will be removed and the actual values will be retained.
   week = doc %>% html_nodes('th[scope = "row"][data-stat="week_num"]') %>% html_text(trim = TRUE) %>% as.numeric()
   indexes_to_use = which(week <= 18)
@@ -410,14 +657,14 @@ get_weather = function(date, time_of_day, stadium)
   weather_station_links = read.csv("https://docs.google.com/spreadsheets/d/e/2PACX-1vT9_LcNO2d8L5kzbJQZZti9kxfAZRFRAl2oJz5WlpusfvL1txbkc8OU6BSlB54TA9HCBHRlIxi9MpuT/pub?gid=1923508036&single=true&output=csv")
   
   station_link = weather_station_links$Link[which(weather_station_links$Team == stadium)]
-  weather_doc = get_html(paste0(station_link,date))
+  weather_doc = get_html_content(paste0(station_link,date))
   
   min_temp = weather_doc %>% html_node('.temp_mn .value') %>% html_text(trim = TRUE)
   
   if(is.na(min_temp))
   {
     date_to_scrape = as.Date(date) - 1
-    weather_doc = get_html(paste0(station_link,date))
+    weather_doc = get_html_content(paste0(station_link,date))
     min_temp = weather_doc %>% html_node('.temp_mn .value') %>% html_text(trim = TRUE)
     mean_temp = weather_doc %>% html_node('.temp .value') %>% html_text(trim = TRUE)
     max_temp = weather_doc %>% html_node('.temp_mx .value') %>% html_text(trim = TRUE)
@@ -451,7 +698,7 @@ get_qb_list = function()
 
   for (let in LETTERS)
   {
-    player_list = get_html(url = paste0("https://www.pro-football-reference.com/players/",let))
+    player_list = get_html_content(url = paste0("https://www.pro-football-reference.com/players/",let))
     if (any(str_detect(player_list %>% html_nodes("p") %>% as.character(), 'block traffic')))
     {
       print("Site detected scraping. Try again in one hour.")
@@ -478,7 +725,7 @@ get_qb_list = function()
 get_qb_gamelog = function(qb_list, y)
 {
   url = paste0("https://www.pro-football-reference.com",gsub('.htm','',qb_list$links),'/gamelog/',y,'/')
-  game_log_html = get_html(url)
+  game_log_html = get_html_content(url)
   
   df = data.frame(week_num = game_log_html %>% html_nodes(xpath = paste0('//tbody/tr[not(ancestor::tfoot)]/td[@data-stat="week_num"]')) %>% html_text(trim = TRUE) %>% as.numeric())
   
@@ -546,7 +793,7 @@ get_qb_data = function()
 
 get_injuries_data = function(year, week_num)
 {
-  injuries_html = get_html(url = paste0('https://www.nfl.com/injuries/league/', year, '/reg', week_num))
+  injuries_html = get_html_content(url = paste0('https://www.nfl.com/injuries/league/', year, '/reg', week_num))
 
   # Extract player names, practice participation, and game status
   players = injuries_html %>%
@@ -584,7 +831,7 @@ get_receiving_props <- function() {
   # URL for NFL event group (replace "88808" if the event group ID changes)
   base_url <- "https://sportsbook.draftkings.com/sites/US-NJ-SB/api/v5/eventgroups/88808/categories/1342?format=json"
   
-  response = get_html(base_url)
+  response = get_html_content(base_url)
   
   script_text <- response %>% 
     html_nodes("script") %>% 
@@ -621,11 +868,11 @@ get_receiving_props <- function() {
 create_prediction_df = function(wk_num, player_df,season, df, full_df, schedule_df, future_weather, starting_qbs, stadiums, team_stats_by_game, injuries, long_travel) {
   Name = unique(df$name)
   
-  team = get_html(paste0("https://www.pro-football-reference.com",player_df$links[player_df$names == Name])) %>%
+  team = get_html_content(paste0("https://www.pro-football-reference.com",player_df$links[player_df$names == Name])) %>%
                     html_nodes("p") %>% html_text(trim = TRUE)
   if(length(team) == 0)
   {
-    team = get_html(paste0("https://www.pro-football-reference.com",player_df$links[player_df$names == Name])) %>%
+    team = get_html_content(paste0("https://www.pro-football-reference.com",player_df$links[player_df$names == Name])) %>%
       html_nodes("p") %>% html_text(trim = TRUE)
   }
   team_fullname = gsub(' \\(.*','',gsub('Team: ', '', str_extract(team[which(str_detect(team, 'Team'))], 'Team:.*')))
