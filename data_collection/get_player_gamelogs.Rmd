@@ -1,0 +1,267 @@
+---
+title: "get_player_game_logs"
+author: "Izzy Beers, ib2392"
+date: "2025-05-05"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r}
+source('global.R')
+```
+
+```{r}
+
+gamelog_html_table_tag = 'stats'
+gamelog_advanced_html_table_tag = 'adv_rushing_and_receiving'
+gamelog_advanced_passing_table_tag = 'passing_advanced'
+
+player_bios = readRDS("saved_data_files/full_list_player_bios.rds") %>% unique() %>% data.frame()
+
+```
+
+```{r}
+t1 = Sys.time()
+
+start = 1
+failed_player_ids = c()
+gamelogs = list()
+for(p in start:nrow(player_bios))
+# indices = sort(sample(1:nrow(player_bios), 200))
+# for(p in sort(indices)[start:length(indices)])
+{
+  print(p)
+  player_min_year = max(2020,(player_bios$min_year[p]))
+  player_max_year = player_bios$max_year[p]
+  for (y in player_min_year:player_max_year)
+  {
+    gamelog_with_stats = tryCatch({
+        get_game_log(player_row = player_bios[p,],
+                     yr = y,
+                     gamelog_table_tag = gamelog_html_table_tag,
+                     gamelog_advanced_table_tag = gamelog_advanced_html_table_tag,
+                     gamelog_advanced_passing_table_tag = gamelog_advanced_passing_table_tag)
+      }, error = function(e) {
+        message("Error encountered. Waiting 5 minutes before retrying...")
+        Sys.sleep(300)
+        tryCatch({
+          get_game_log(player_row = player_bios[p,],
+                       yr = y,
+                       gamelog_table_tag = gamelog_html_table_tag,
+                       gamelog_advanced_table_tag = gamelog_advanced_html_table_tag,
+                       gamelog_advanced_passing_table_tag = gamelog_advanced_passing_table_tag)
+        }, error = function(e2) {
+          message("Second attempt failed.")
+          failed_player_ids = c(failed_player_ids, player_bios$player_id[p])
+          return(NULL)
+        })
+})
+    if(!is.null(gamelog_with_stats) && nrow(gamelog_with_stats) > 0)
+    {
+      basic_cols = c('player_id', 'Name', 'Position', 'Month', 'Gtm', 'Week', 'day_of_week', 'Date', 'Team', 'Game_Location', 'Opp', 'Result', 'Season')
+      team_cols = c('Win', 'Differential')
+      gamelog_with_stats[which(gamelog_with_stats$Active == 0), setdiff(colnames(gamelog_with_stats), c(basic_cols, team_cols, 'Active'))] = NA
+      gamelog_with_stats = gamelog_with_stats %>% arrange(Week) %>% get_cumulative(last3 = FALSE, skip = basic_cols, team = team_cols)
+      gamelog_with_stats = gamelog_with_stats %>% get_cumulative(last3 = TRUE, skip = c(basic_cols, colnames(gamelog_with_stats)[str_detect(colnames(gamelog_with_stats), 'Cumulative_|Avg_|Median_|Min_|Max_|SD_')]), team = team_cols)
+      
+      if('Receiving_Yds' %in% colnames(gamelog_with_stats))
+      {
+           gamelog_with_stats = gamelog_with_stats %>% mutate(
+             Receiving_Yds_Lag1 = lag(Receiving_Yds, n = 1, order_by = Week),
+             Receiving_Yds_Lag2 = lag(Receiving_Yds, n = 2, order_by = Week),
+             Receiving_Yds_Lag3 = lag(Receiving_Yds, n = 3, order_by = Week))
+      }
+      if('Rushing_Yds' %in% colnames(gamelog_with_stats))
+      {
+        gamelog_with_stats = gamelog_with_stats %>% mutate(
+             Rushing_Yds_Lag1 = lag(Rushing_Yds, n = 1, order_by = Week),
+             Rushing_Yds_Lag2 = lag(Rushing_Yds, n = 2, order_by = Week),
+             Rushing_Yds_Lag3 = lag(Rushing_Yds, n = 3, order_by = Week))
+      }
+      if('Passing_Yds' %in% colnames(gamelog_with_stats))
+      {
+        gamelog_with_stats = gamelog_with_stats %>% mutate(
+             Passing_Yds_Lag1 = lag(Passing_Yds, n = 1, order_by = Week),
+             Passing_Yds_Lag2 = lag(Passing_Yds, n = 2, order_by = Week),
+             Passing_Yds_Lag3 = lag(Passing_Yds, n = 3, order_by = Week))
+      }
+      
+      
+        
+      gamelogs = append(gamelogs, list(gamelog_with_stats))
+    }
+    wait = runif(1,2,4)
+    Sys.sleep(wait)
+  }
+  
+  if(p%%100 == 0)
+  {
+    saveRDS(gamelogs, paste0('backup/sample_gamelogs_',p,'.rds'))
+  }
+  
+  
+}
+
+saveRDS(gamelogs, 'backup/list_gamelogs.rds')
+```
+
+```{r}
+gamelogs = list()
+for (i in 1:12)
+{
+  g = readRDS(paste0('backup/sample_gamelogs_', i*100,'.rds'))
+  gamelogs = append(gamelogs, g)
+}
+gamelogs = append(gamelogs, readRDS('backup/sample_gamelogs.rds'))
+gamelogs = unique(gamelogs)
+
+all_columns = unique(unlist(sapply(gamelogs, colnames)))
+columns_aligned = lapply(gamelogs, function(df) {
+  missing_cols = setdiff(all_columns, names(df))         
+  df[missing_cols] = NA                                       
+  df = df[, all_columns, drop = FALSE]                   
+  return(df)
+})
+gamelogs_df = bind_rows(columns_aligned)
+
+gamelogs_df = gamelogs_df %>% arrange(Week) %>%
+        select(player_id, Name, Position, Season, Gtm, Week, Date, Team, Opp, Game_Location, Month, day_of_week, Win, Differential, Active, GS, everything())
+
+print(Sys.time() - t1)
+
+saveRDS(gamelogs_df, 'backup/gamelogs_initial.rds')
+```
+
+```{r}
+columns_to_remove = c()
+columns_0_1 = c()
+low_medians = c()
+for (c in colnames(gamelogs_df))
+{
+  pct_nonmissing = mean(!is.na(gamelogs_df[,c]))
+  unique_values = gamelogs_df %>% select(!!sym(c)) %>% pull() %>% unique()
+  median = gamelogs_df %>% select(!!sym(c)) %>% pull() %>% median(na.rm =TRUE)
+  mean = gamelogs_df %>% select(!!sym(c)) %>% pull() %>% mean(na.rm = TRUE)
+  if((pct_nonmissing > 0.05) & (length(unique_values) > 1))
+  {
+    if(all(unique_values[which(!is.na(unique_values))] %in% c(0,1)))
+    {
+      columns_0_1 = c(columns_0_1, c)
+    } else if (!is.na(median) && (median == 0 & mean < 1 & length(unique_values) < 10))
+    {
+      low_medians = c(low_medians, c)
+    }
+  } else {
+    columns_to_remove = c(columns_to_remove, c)
+  }
+}
+
+gamelogs_df = gamelogs_df %>% conditionally_remove(columns_to_remove)
+if(length(columns_0_1) > 0)
+{
+  gamelogs_df = gamelogs_df %>% conditionally_remove(colnames(gamelogs_df)[which(colnames(gamelogs_df) %in% paste0('SD_', columns_0_1))])
+  gamelogs_df = gamelogs_df %>% conditionally_remove(colnames(gamelogs_df)[which(colnames(gamelogs_df) %in% paste0('Last3_SD_', columns_0_1))])
+  gamelogs_df = gamelogs_df %>% conditionally_remove(colnames(gamelogs_df)[which(colnames(gamelogs_df) %in% paste0('Median_', columns_0_1))])
+  gamelogs_df = gamelogs_df %>% conditionally_remove(colnames(gamelogs_df)[which(colnames(gamelogs_df) %in% paste0('Last3_Median_', columns_0_1))])
+  gamelogs_df = gamelogs_df %>% conditionally_remove(colnames(gamelogs_df)[which(colnames(gamelogs_df) %in% paste0('Max_', columns_0_1))])
+  gamelogs_df = gamelogs_df %>% conditionally_remove(colnames(gamelogs_df)[which(colnames(gamelogs_df) %in% paste0('Last3_Max_', columns_0_1))])
+  gamelogs_df = gamelogs_df %>% conditionally_remove(colnames(gamelogs_df)[which(colnames(gamelogs_df) %in% paste0('Min_', columns_0_1))])
+  gamelogs_df = gamelogs_df %>% conditionally_remove(colnames(gamelogs_df)[which(colnames(gamelogs_df) %in% paste0('Last3_Min_', columns_0_1))])
+}
+if(length(low_medians) > 0)
+{
+  gamelogs_df = gamelogs_df %>% conditionally_remove(colnames(gamelogs_df)[which(colnames(gamelogs_df) %in% paste0('Median_', low_medians))])
+  gamelogs_df = gamelogs_df %>% conditionally_remove(colnames(gamelogs_df)[which(colnames(gamelogs_df) %in% paste0('Last3_Median_', low_medians))])
+  gamelogs_df = gamelogs_df %>% conditionally_remove(colnames(gamelogs_df)[which(colnames(gamelogs_df) %in% paste0('Max_', columns_0_1))])
+  gamelogs_df = gamelogs_df %>% conditionally_remove(colnames(gamelogs_df)[which(colnames(gamelogs_df) %in% paste0('Last3_Max_', columns_0_1))])
+}
+
+colnames(gamelogs_df)[which(colnames(gamelogs_df) == 'Avg_Win')]  = 'Pct_Win'
+colnames(gamelogs_df)[which(colnames(gamelogs_df) == 'Avg_GS')]  = 'Pct_GS'
+colnames(gamelogs_df)[which(colnames(gamelogs_df) == 'Avg_Active')]  = 'Pct_Active'
+      
+
+```
+
+
+
+```{r}
+
+summary_function = function(df, c, all_pos)
+{
+  column = df %>% select(!!sym(c)) %>% pull()
+  class = class(column)
+  pct_nonmissing = mean(!is.na(column))
+  unique_values = paste(sort(unique(column)), collapse = ",")
+  mean = mean(column, na.rm = TRUE)
+  median = median(column, na.rm = TRUE)
+  min = min(column, na.rm = TRUE)
+  max = max(column, na.rm = TRUE)
+  
+  indices_nonmissing = which(!is.na(column))
+  df_subset = df[indices_nonmissing,]
+  position_rates = c()
+  for (p in all_pos)
+  {
+    total_position_active =  sum(str_detect(df$Position, p) & df$Active == 1 & df$Gtm > 1)
+    nonmissing_position = sum(str_detect(df_subset$Position, p) & df_subset$Active == 1 & df_subset$Gtm > 1)
+    position_rates = c(position_rates, nonmissing_position/total_position_active)
+  }
+  
+  return(c(c, class, unique_values, mean, median, min, max, pct_nonmissing, position_rates))
+  
+}
+
+summary_table = rbind()
+for (c in setdiff(colnames(gamelogs_df), c('player_id', 'Name', 'Position', 'Season')))
+{
+  summary_table = rbind(summary_table, summary_function(df = gamelogs_df, c = c, all_pos = sort(unique(unlist(strsplit(df$Position, '-|/'))))))
+}
+summary_table = data.frame(summary_table)
+colnames(summary_table) = c('Colname', 'Class','unique_values', 'Mean', 'Median', 'Min', 'Max', 'Pct_nonmissing', all_pos)
+View(summary_table)
+
+```
+
+```{r}
+
+
+gamelogs_df = gamelogs_df %>% 
+  mutate(This_Season_Passing_Comp_Pct = Cumulative_Passing_Cmp / Cumulative_Passing_Att,
+         This_Season_Receiving_Catch_Pct = Cumulative_Receiving_Rec / Cumulative_Receiving_Tgt,
+         This_Season_Passing_Yds_Per_Completion = Cumulative_Passing_Yds / Cumulative_Passing_Cmp,
+         This_Season_Passing_Yds_Per_Attempt = Cumulative_Passing_Yds / Cumulative_Passing_Att,
+         This_Season_Rushing_Yds_Per_Attempt = Cumulative_Rushing_Yds / Cumulative_Rushing_Att,
+         This_Season_Rushing_1D_Per_Attempt = Cumulative_Rushing_1D / Cumulative_Rushing_Att,
+         This_Season_Rushing_YAC_Per_Attempt = Cumulative_Rushing_YAC / Cumulative_Rushing_Att,
+         This_Season_Receiving_Yds_Per_Tgt = Cumulative_Receiving_Yds / Cumulative_Receiving_Tgt,
+         This_Season_Receiving_Yds_Per_Rec = Cumulative_Receiving_Yds / Cumulative_Receiving_Rec,
+         This_Season_Receiving_1D_Per_Tgt = Cumulative_Receiving_1D / Cumulative_Receiving_Tgt,
+         This_Season_Receiving_1D_Per_Rec = Cumulative_Receiving_1D / Cumulative_Receiving_Rec,
+         This_Season_Receiving_YBC_Per_Tgt = Cumulative_Receiving_YBC / Cumulative_Receiving_Tgt,
+         This_Season_Receiving_YBC_Per_Rec = Cumulative_Receiving_YBC / Cumulative_Receiving_Rec,
+         This_Season_Receiving_YAC_Per_Tgt = Cumulative_Receiving_YAC / Cumulative_Receiving_Tgt,
+         This_Season_Receiving_YAC_Per_Rec = Cumulative_Receiving_YAC / Cumulative_Receiving_Rec,
+         Last3_Passing_Comp_Pct = Last3_Cumulative_Passing_Cmp / Last3_Cumulative_Passing_Att,
+         Last3_Receiving_Catch_Pct = Last3_Cumulative_Receiving_Rec / Last3_Cumulative_Receiving_Tgt,
+         Last3_Passing_Yds_Per_Completion = Last3_Cumulative_Passing_Yds / Last3_Cumulative_Passing_Cmp,
+         Last3_Passing_Yds_Per_Attempt = Last3_Cumulative_Passing_Yds / Last3_Cumulative_Passing_Att,
+         Last3_Rushing_Yds_Per_Attempt = Last3_Cumulative_Rushing_Yds / Last3_Cumulative_Rushing_Att,
+         Last3_Rushing_1D_Per_Attempt = Last3_Cumulative_Rushing_1D / Last3_Cumulative_Rushing_Att,
+         Last3_Rushing_YAC_Per_Attempt = Last3_Cumulative_Rushing_YAC / Last3_Cumulative_Rushing_Att,
+         Last3_Receiving_Yds_Per_Tgt = Last3_Cumulative_Receiving_Yds / Last3_Cumulative_Receiving_Tgt,
+         Last3_Receiving_Yds_Per_Rec = Last3_Cumulative_Receiving_Yds / Last3_Cumulative_Receiving_Rec,
+         Last3_Receiving_1D_Per_Tgt = Last3_Cumulative_Receiving_1D / Last3_Cumulative_Receiving_Tgt,
+         Last3_Receiving_1D_Per_Rec = Last3_Cumulative_Receiving_1D / Last3_Cumulative_Receiving_Rec,
+         Last3_Receiving_YBC_Per_Tgt = Last3_Cumulative_Receiving_YBC / Last3_Cumulative_Receiving_Tgt,
+         Last3_Receiving_YBC_Per_Rec = Last3_Cumulative_Receiving_YBC / Last3_Cumulative_Receiving_Rec,
+         Last3_Receiving_YAC_Per_Tgt = Last3_Cumulative_Receiving_YAC / Last3_Cumulative_Receiving_Tgt,
+         Last3_Receiving_YAC_Per_Rec = Last3_Cumulative_Receiving_YAC / Last3_Cumulative_Receiving_Rec
+         )
+
+saveRDS(gamelogs_df, 'saved_data_files/player_gamelogs.rds')
+
+```
