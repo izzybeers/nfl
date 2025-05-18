@@ -1,7 +1,7 @@
 ---
-title: "get_player_game_logs"
-author: "Izzy Beers, ib2392"
-date: "2025-05-05"
+title: "Get Player Gamelogs'
+author: "Izzy Beers"
+date: '`r Sys.time()`'
 output: html_document
 ---
 
@@ -136,28 +136,17 @@ saveRDS(gamelogs_df, 'backup/gamelogs_initial.rds')
 ```
 
 ```{r}
-columns_to_remove = c()
-columns_0_1 = c()
-low_medians = c()
-for (c in colnames(gamelogs_df))
-{
-  pct_nonmissing = mean(!is.na(gamelogs_df[,c]))
-  unique_values = gamelogs_df %>% select(!!sym(c)) %>% pull() %>% unique()
-  median = gamelogs_df %>% select(!!sym(c)) %>% pull() %>% median(na.rm =TRUE)
-  mean = gamelogs_df %>% select(!!sym(c)) %>% pull() %>% mean(na.rm = TRUE)
-  if((pct_nonmissing > 0.05) & (length(unique_values) > 1))
-  {
-    if(all(unique_values[which(!is.na(unique_values))] %in% c(0,1)))
-    {
-      columns_0_1 = c(columns_0_1, c)
-    } else if (!is.na(median) && (median == 0 & mean < 1 & length(unique_values) < 10))
-    {
-      low_medians = c(low_medians, c)
-    }
-  } else {
-    columns_to_remove = c(columns_to_remove, c)
-  }
-}
+
+#This section will do the following:
+#1. For stats that are 0/1 (like Active, Game Started), a median, sd, max, and min don't make sense. For these, we will just keep the cumulative amount and the mean.
+#2. For stats with very low medians, like number of touchdowns (which are mostly 0 or 1, and in very few cases at least 2), no reason to have min or median. Only cumulative, mean, max and maybe sd are useful.
+#3. Any columns that are all NA or only have one unique value will be removed.
+
+uninformative_stats_results = remove_uninformative_stats(df = grouped_table, column_list = setdiff(colnames(gamelog_df), c(basic_cols, team_cols)))
+
+columns_to_remove = uninformative_stats_results[[1]]
+columns_0_1 = uninformative_stats_results[[2]]
+low_medians = uninformative_stats_results[[3]]
 
 gamelogs_df = gamelogs_df %>% conditionally_remove(columns_to_remove)
 if(length(columns_0_1) > 0)
@@ -179,9 +168,10 @@ if(length(low_medians) > 0)
   gamelogs_df = gamelogs_df %>% conditionally_remove(colnames(gamelogs_df)[which(colnames(gamelogs_df) %in% paste0('Last3_Max_', columns_0_1))])
 }
 
-colnames(gamelogs_df)[which(colnames(gamelogs_df) == 'Avg_Win')]  = 'Pct_Win'
-colnames(gamelogs_df)[which(colnames(gamelogs_df) == 'Avg_GS')]  = 'Pct_GS'
-colnames(gamelogs_df)[which(colnames(gamelogs_df) == 'Avg_Active')]  = 'Pct_Active'
+gamelogs_df = gamelogs_df %>%
+  rename('Pct_Win' = 'Avg_Win',
+         'Pct_GS' = 'Avg_GS',
+         'Pct_Active' = 'Avg_Active')
       
 
 ```
@@ -228,6 +218,7 @@ View(summary_table)
 
 ```{r}
 
+#in the above sections we have derived per-game stats (like average number of receiving yards per game, median number of receiving yards per game, etc) so in this section we will derive other fields like receiving yards per target, receptions per target, passing yards per attempt, passing completions per attempt, etc.
 
 gamelogs_df = gamelogs_df %>% 
   mutate(This_Season_Passing_Comp_Pct = Cumulative_Passing_Cmp / Cumulative_Passing_Att,
@@ -245,6 +236,8 @@ gamelogs_df = gamelogs_df %>%
          This_Season_Receiving_YBC_Per_Rec = Cumulative_Receiving_YBC / Cumulative_Receiving_Rec,
          This_Season_Receiving_YAC_Per_Tgt = Cumulative_Receiving_YAC / Cumulative_Receiving_Tgt,
          This_Season_Receiving_YAC_Per_Rec = Cumulative_Receiving_YAC / Cumulative_Receiving_Rec,
+         This_Season_Pct_Offensive_Snaps = `Cumulative_Snap Counts_OffSnp` / Cumulative_Total_Team_Off_Snaps,
+         This_Season_Pct_ST_Snaps = `Cumulative_Snap Counts_STSnp` / Cumulative_Total_Team_ST_Snaps,
          Last3_Passing_Comp_Pct = Last3_Cumulative_Passing_Cmp / Last3_Cumulative_Passing_Att,
          Last3_Receiving_Catch_Pct = Last3_Cumulative_Receiving_Rec / Last3_Cumulative_Receiving_Tgt,
          Last3_Passing_Yds_Per_Completion = Last3_Cumulative_Passing_Yds / Last3_Cumulative_Passing_Cmp,
@@ -259,7 +252,9 @@ gamelogs_df = gamelogs_df %>%
          Last3_Receiving_YBC_Per_Tgt = Last3_Cumulative_Receiving_YBC / Last3_Cumulative_Receiving_Tgt,
          Last3_Receiving_YBC_Per_Rec = Last3_Cumulative_Receiving_YBC / Last3_Cumulative_Receiving_Rec,
          Last3_Receiving_YAC_Per_Tgt = Last3_Cumulative_Receiving_YAC / Last3_Cumulative_Receiving_Tgt,
-         Last3_Receiving_YAC_Per_Rec = Last3_Cumulative_Receiving_YAC / Last3_Cumulative_Receiving_Rec
+         Last3_Receiving_YAC_Per_Rec = Last3_Cumulative_Receiving_YAC / Last3_Cumulative_Receiving_Rec,
+         Last3_Pct_Offensive_Snaps = `Last3_Cumulative_Snap Counts_OffSnp` / Last3_Cumulative_Total_Team_Off_Snaps,
+         Last3_Pct_ST_Snaps = `Last3_Cumulative_Snap Counts_STSnp` / Last3_Cumulative_Total_Team_ST_Snaps,
          )
 
 saveRDS(gamelogs_df, 'saved_data_files/player_gamelogs.rds')
