@@ -413,49 +413,7 @@ get_cumulative = function(log, last3, skip, team = c('Win', 'Differential'))
     return(log)
   
 }
-# get_per_game_stats = function(log)
-#   {
-#     df = log %>%
-#       mutate(Games_Active_Season=  cumsum(Active) - Active, #number of active games prior to this game
-#              Games_Started_Season = cumsum(GS) - GS, # number of games started prior to this game
-#              Cumulative_Receiving_Yards = get_cumulative_amount(Active, column = Receiving_Yds),
-#              Cumulative_Targets = get_cumulative_amount(Active, column = Receiving_Tgt),
-#              Cumulative_Rec = get_cumulative_amount(active, column = Receiving-Rec),
-#              Cumulative_TDs = get_cumulative_amount(Active, column = Total_Touchdowns),
-#              Cumulative_Snaps_Played = get_cumulative_amount(Active, column = snap_counts_offense),
-#              Cumulative_Kick_Returns =  get_cumulative_amount(Active, column = kick_ret),
-#              Cumulative_Fumbles = get_cumulative_amount(Active, column = fumbles),
-#              Cumulative_Fumbles_Lost = get_cumulative_amount(Active, column = fumbles_lost),
-#              Cumulative_Fumbles_Forced = get_cumulative_amount(Active, column = fumbles_forced),
-#              Cumulative_Fumbles_Rec = get_cumulative_amount(active, column = fumbles_rec),
-#              Cumulative_Fumbles_Rec_Yds = get_cumulative_amount(active, column = fumbles_rec_yds),
-#              Cumulative_Rush_Attempts = get_cumulative_amount(active, column = rush_att),
-#              Cumulative_Rush_First_Down = get_cumulative_amount(active, column = rush_first_down),
-#              Cumulative_Rush_Yds_Before_Contact = get_cumulative_amount(active, column =  rush_yds_before_contact),
-#              Cumulative_Rec_Air_Yards = get_cumulative_amount(active, column = rec_air_yds),
-#              Cumulative_Rec_YAC = get_cumulative_amount(active, column = rec_yac),
-#              Cumulative_Target_Depth = get_cumulative_amount(active, column = total_target_depth),
-#              Cumulative_Rush_Broken_Tackles = get_cumulative_amount(active, column = rush_broken_tackles),
-#              Cumulative_Rec_First_Down = get_cumulative_amount(active, column = rec_first_down),
-#              Cumulative_Rec_Drops = get_cumulative_amount(active, column = rec_drops),
-#              Cumulative_Target_Interceptions = get_cumulative_amount(active, column = rec_target_int),
-#              Cumulative_Kick_Returns =  get_cumulative_amount(active, column = kick_ret)
-#              
-#       )
-#     
-#     df = df %>% mutate(
-#         Percent_Games_Started_Season = ifelse(is.na(Cumulative_Games_Active) | Cumulative_Games_Active == 0, NA, Games_Started_Season/Cumulative_Games_Active),
-#         Avg_Targets_Per_Game = ifelse(is.na(Cumulative_Games_Active) | Cumulative_Games_Active == 0, NA, Cumulative_Targets/Cumulative_Games_Active),
-#         Avg_Rec_Per_Game = ifelse(is.na(Cumulative_Games_Active) | Cumulative_Games_Active == 0, NA, Cumulative_Rec/Cumulative_Games_Active),
-#         Avg_Rec_Per_Target = ifelse(is.na(Cumulative_Targets) | Cumulative_Targets == 0, NA, Cumulative_Rec/Cumulative_Targets),
-#         Avg_Receiving_Yards_Per_Game = ifelse(is.na(Cumulative_Games_Active) | Cumulative_Games_Active == 0, NA, Cumulative_Rec_Yards/Cumulative_Games_Active),
-#         Avg_Receiving_Yards_Per_Target = ifelse(is.na(Cumulative_Targets) | Cumulative_Targets == 0, NA, Cumulative_Rec_Yards/Cumulative_Targets),
-#         Avg_Receiving_TDs_Per_Game = ifelse(is.na(Cumulative_Games_Active) | Cumulative_Games_Active == 0, NA, Cumulative_Receiving_TDs/Cumulative_Games_Active),
-#         Avg_Percent_Snaps_Played = ifelse(is.na(Cumulative_Team_Snaps), NA, Cumulative_Snaps_Played/Cumulative_Team_Snaps), #Cumulative_Team_Snaps already assumes active games
-#       )
-#     
-#     return(df)
-#   }
+
 
   get_last_3_games = function(week_num, field_name, df, max_games = 5, required_games = 3) {
     df = df %>% arrange(week_num)
@@ -517,6 +475,33 @@ get_cumulative = function(log, last3, skip, team = c('Win', 'Differential'))
 #     return(NA)
 #   }
 # }
+  
+remove_uninformative_stats = function(df, column_list)
+{
+  columns_to_remove = c()
+  columns_0_1 = c()
+  low_medians = c()
+  for (c in column_list)
+  {
+    pct_nonmissing = mean(!is.na(df[,c]))
+    unique_values = df %>% select(!!sym(c)) %>% pull() %>% unique()
+    median = df %>% select(!!sym(c)) %>% pull() %>% median(na.rm =TRUE)
+    mean = df %>% select(!!sym(c)) %>% pull() %>% mean(na.rm = TRUE)
+    if((pct_nonmissing > 0.05) & (length(unique_values) > 1))
+    {
+      if(all(unique_values[which(!is.na(unique_values))] %in% c(0,1)))
+      {
+        columns_0_1 = c(columns_0_1, c)
+      } else if (!is.na(median) && (median == 0 & mean < 1 & length(unique_values) < 10))
+      {
+        low_medians = c(low_medians, c)
+      }
+    } else {
+      columns_to_remove = c(columns_to_remove, c)
+    }
+  }
+  return(list(columns_to_remove, columns_0_1, low_medians))
+}
 
 add_players_performance_recent_years = function(df)
 {
