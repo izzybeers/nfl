@@ -12,9 +12,12 @@ knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 
 ```{r}
 
+
 player_bios = readRDS('saved_data_files/player_bios.rds')
 player_gamelogs = readRDS('saved_data_files/player_gamelogs.rds')
 player_seasonal_stats = readRDS('saved_data_files/player_end_of_season_summary_stats.rds')
+team_gamelogs = readRDS('saved_data_files/team_gamelogs.rds')
+
 
 
 ```

@@ -4,13 +4,13 @@ library(RSelenium)
 library(wdman)
 library(chromote)
 library(stringr)
+library(xml2)
 library(dplyr)
 
 options(chromote.headless = "new")
 Sys.setenv(CHROMOTE_CHROME = "/Users/izzybeers/chrome-headless-shell/mac-136.0.7103.49/chrome-headless-shell-mac-x64/chrome-headless-shell")
 
 team_lookup_table = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vT9_LcNO2d8L5kzbJQZZti9kxfAZRFRAl2oJz5WlpusfvL1txbkc8OU6BSlB54TA9HCBHRlIxi9MpuT/pub?gid=0&single=true&output=csv')
-
 
 get_html_content = function(url, max_retries = 3) {
   retries = 0
@@ -66,7 +66,7 @@ get_player_bio = function(player_row)
   if (any(str_detect(html_response %>% html_nodes("p") %>% as.character(), 'block traffic')))
   {
     print("Site detected scraping. Try again in one hour.")
-    Sys.sleep(65)
+    Sys.sleep(65*60)
     html_response = get_html_content(url = url)
   }
   
@@ -305,28 +305,9 @@ get_game_log = function(player_row, yr, wk = NULL, gamelog_table_tag, gamelog_ad
     return(NULL)
   }
 }
-  
-# get_cumulatives = function(log, skip, team = c('Win', 'Differential'))
-# {
-#   for (c in setdiff(colnames(log), skip))
-#   {
-#     for (g )
-#     new_values_sum = as.numeric((cumsum(replace(log[,c], is.na(log[,c]),0)) - replace(log[,c], is.na(log[,c]),0))[,1])
-#     if(!(c %in% team))
-#     {
-#       new_values[which(cumsum(log$Active)<= 1)] = NA #first active game of season, or any inactive games before first active game, should not have any previous "player stats"
-#     } else {
-#       new_values[1] = NA #for team stats like win and differential, should just be NA for the first game since no previous stats
-#     }
-#     new_colname = paste0('Cumulative_Prior_',c)
-#     log[[new_colname]] = new_values
-#   }
-#   return(log)
-# }
 
 
-
-get_cumulative = function(log, last3, skip, team = c('Win', 'Differential'))
+get_cumulative = function(log, last3, skip, team)
 {
   for (c in setdiff(colnames(log), skip))
   {
@@ -413,29 +394,29 @@ get_cumulative = function(log, last3, skip, team = c('Win', 'Differential'))
     return(log)
   
 }
-
-
-  get_last_3_games = function(week_num, field_name, df, max_games = 5, required_games = 3) {
-    df = df %>% arrange(week_num)
-    
-    # Only consider weeks before the target week
-    df_prior = df %>% filter(week_num < week_num)
-    
-    if (nrow(df_prior) == 0) return(NA)
-    
-    # Limit to max_games lookback
-    df_window = df_prior %>% tail(max_games)
-    
-    # Filter for games where player was active (non-NA in 'gs')
-    df_active = df_window %>% filter(!is.na(started))
-    
-    if (nrow(df_active) == 0) return(NA)
-    
-    # If fewer than required_games active, use however many we got
-    df_recent = df_active %>% tail(required_games)
-    
-    median(as.numeric(df_recent[[field_name]]), na.rm = TRUE)
-  }
+# 
+# 
+#   get_last_3_games = function(week_num, field_name, df, max_games = 5, required_games = 3) {
+#     df = df %>% arrange(week_num)
+#     
+#     # Only consider weeks before the target week
+#     df_prior = df %>% filter(week_num < week_num)
+#     
+#     if (nrow(df_prior) == 0) return(NA)
+#     
+#     # Limit to max_games lookback
+#     df_window = df_prior %>% tail(max_games)
+#     
+#     # Filter for games where player was active (non-NA in 'gs')
+#     df_active = df_window %>% filter(!is.na(started))
+#     
+#     if (nrow(df_active) == 0) return(NA)
+#     
+#     # If fewer than required_games active, use however many we got
+#     df_recent = df_active %>% tail(required_games)
+#     
+#     median(as.numeric(df_recent[[field_name]]), na.rm = TRUE)
+#   }
 
 # get_last_3_games = function(week_num_html_tag, field_name, df, max_games = 5, team_html_tag)
 # {
@@ -532,88 +513,57 @@ add_players_performance_recent_years = function(df)
 
 
 
-
-
-get_team_stats_per_game = function(t, y) {
-  link_abbr = ifelse(t == 'lvr', 'rai',
-                     ifelse(t=='ari', 'crd',
-                            ifelse(t == 'lar','ram',
-                                   ifelse(t=='lac','sdg',
-                                          ifelse(t=='ind','clt',
-                                                 ifelse(t=='hou','htx',
-                                                        ifelse(t=='bal','rav',
-                                                               ifelse(t=='ten','oti',
-                                                                      t))))))))
-  #use the get_html function I defined above, and use for the below url.
-  doc = get_html_content(url = paste0("https://www.pro-football-reference.com/teams/",link_abbr,"/",y,".htm#all_games"))
-  #in the source code for this link, find the week number, and see how the html is organized there. trim = TRUE means that the html tags will be removed and the actual values will be retained.
-  week = doc %>% html_nodes('th[scope = "row"][data-stat="week_num"]') %>% html_text(trim = TRUE) %>% as.numeric()
-  indexes_to_use = which(week <= 18)
-  #then do the rest for all the other pieces of information on this page.
-  time = gsub(' ET', '', doc %>% html_nodes('td[data-stat="game_time"]') %>% html_text(trim = TRUE))
-  outcome = doc %>% html_nodes('td[data-stat="game_outcome"]') %>% html_text(trim = TRUE)
-  points =  doc %>% html_nodes('td[data-stat="pts_off"]') %>% html_text(trim = TRUE) %>% as.numeric()
-  opp_points =  doc %>% html_nodes('td[data-stat="pts_def"]') %>% html_text(trim = TRUE) %>% as.numeric()
-  yards = doc %>% html_nodes('td[data-stat="yards_off"]') %>% html_text(trim = TRUE) %>% as.numeric()
-  opp_yards =  doc %>% html_nodes('td[data-stat="yards_def"]') %>% html_text(trim = TRUE) %>% as.numeric()
-  passing_yards =  doc %>% html_nodes('td[data-stat="pass_yds_off"]') %>% html_text(trim = TRUE) %>% as.numeric()
-  passing_yards_allowed = doc %>% html_nodes('td[data-stat="pass_yds_def"]') %>% html_text(trim = TRUE) %>% as.numeric()
-  turnovers_allowed = doc %>% html_nodes('td[data-stat="to_off"]') %>% html_text(trim = TRUE) %>% as.numeric()
-  turnovers_forced = doc %>% html_nodes('td[data-stat="to_def"]') %>% html_text(trim = TRUE) %>% as.numeric()
+get_team_game_logs = function(url)
+{
+  doc = get_html_content(url = url)
   
-  df = data.frame(Season = y, team = toupper(t), week = week[which(week <= 18)], time = time[which(week <= 18)], outcome = outcome[which(week <= 18)],
-                  points = points[which(week <= 18)], opp_points = opp_points[which(week <= 18)], yards = yards[which(week <= 18)], opp_yards = opp_yards[which(week <= 18)],
-                  passing_yards = passing_yards[which(week <= 18)], passing_yards_allowed = passing_yards_allowed[which(week <= 18)], turnovers_allowed = turnovers_allowed[which(week <= 18)], turnovers_forced = turnovers_forced[which(week <= 18)])
-  bye_week = which(df$time == '')
-  df = df %>% filter(week != bye_week & !is.na(outcome)) %>% mutate(time = ifelse(str_detect(time,'PM'),
-                                                                                  gsub('PM','',paste0(time %>% strsplit(":") %>% sapply(function(x) x[1]) %>% as.numeric() + 12, ":", time %>% strsplit(":") %>% sapply(function(x) x[2]))),gsub('AM','',time)),
-                                                                    turnovers_allowed = replace(turnovers_allowed, is.na(turnovers_allowed), 0),
-                                                                    turnovers_forced = replace(turnovers_forced, is.na(turnovers_forced), 0))
-  df = df %>%
-    mutate(
-      time_of_day = case_when(
-        time < '12:00' ~ 'Morning',
-        time < '16:00' ~ 'Early Window',
-        time < '19:00' ~ 'Late Window',
-        .default = 'Night'
-      ),
-      win = ifelse(outcome == 'W', 1, 0),
-      num_games_so_far = cumsum(outcome != '') - 1,
-      cumulative_wins = cumsum(outcome == 'W') - (outcome == 'W'),
-      cumulative_nonwins = cumsum(outcome != 'W') - (outcome != 'W'),
-      cumulative_points = cumsum(points) - points,
-      cumulative_opp_points = cumsum(opp_points) - opp_points,
-      cumulative_win_points = cumsum(ifelse(outcome == 'W', points, 0)) - ifelse(outcome == 'W', points, 0),
-      cumulative_win_opp_points = cumsum(ifelse(outcome == 'W', opp_points, 0)) - ifelse(outcome == 'W', opp_points, 0),
-      cumulative_yards = cumsum(yards) - yards,
-      cumulative_opp_yards = cumsum(opp_yards) - opp_yards,
-      cumulative_win_yards = cumsum(ifelse(outcome == 'W', yards, 0)) - ifelse(outcome == 'W', yards, 0),
-      cumulative_win_opp_yards = cumsum(ifelse(outcome == 'W', opp_yards, 0)) - ifelse(outcome == 'W', opp_yards, 0),
-      cumulative_passing = cumsum(passing_yards) - (passing_yards),
-      cumulative_passing_allowed = cumsum(passing_yards_allowed) - passing_yards_allowed,
-      cumulative_turnovers_allowed = cumsum(turnovers_allowed) - turnovers_allowed,
-      cumulative_turnovers_forced = cumsum(turnovers_forced) - turnovers_forced,
-      week = as.numeric(week)) %>% select(-time)
+  if (any(str_detect(doc %>% html_nodes("p") %>% as.character(), 'block traffic')))
+  {
+    print("Site detected scraping. Try again in one hour.")
+    Sys.sleep(65*60)
+    doc = get_html_content(url = url)
+  }
   
-  
-  
-  df = df %>%
-    mutate(
-      win_pct = cumulative_wins/num_games_so_far,
-      point_diff = cumulative_points - cumulative_opp_points,
-      point_diff_per_game = ifelse(num_games_so_far == 0, NA, (cumulative_points - cumulative_opp_points)/num_games_so_far),
-      point_diff_per_winning_games = ifelse(cumulative_wins == 0, NA,(cumulative_win_points - cumulative_win_opp_points)/cumulative_wins),
-      yard_diff_per_game = ifelse(num_games_so_far == 0, NA, (cumulative_yards - cumulative_opp_yards)/num_games_so_far),
-      yard_diff_per_winning_games = ifelse(cumulative_wins == 0, NA, (cumulative_win_yards - cumulative_win_opp_yards)/cumulative_wins),
-      team_turnovers_allowed_per_game = ifelse(num_games_so_far == 0, NA, cumulative_turnovers_allowed/num_games_so_far),
-      team_turnovers_forced_per_game =  ifelse(num_games_so_far == 0, NA, cumulative_turnovers_forced/num_games_so_far),
-      passing_yards_per_game = ifelse(num_games_so_far == 0, NA, cumulative_passing/num_games_so_far),
-      passing_yards_allowed_per_game = ifelse(num_games_so_far == 0, NA, cumulative_passing_allowed/num_games_so_far),
-      last_season = Season - 1,
-      seasons_ago_2 = Season - 2
-    )
-
-  return(df)
+  team_gamelog_table_node =  doc %>% html_node('table#games')
+  if (xml_length(team_gamelog_table_node) > 0)
+  {
+    team_gamelog_table = team_gamelog_table_node %>% html_table(fill = TRUE)
+  } else {
+    team_gamelog_table = NULL
+  }
+  if(!is.null(team_gamelog_table) && nrow(team_gamelog_table) > 0)
+  {
+    
+    colnames(team_gamelog_table) = ifelse(colnames(team_gamelog_table) != '',
+                                          paste(colnames(team_gamelog_table), team_gamelog_table[1,], sep = '_'),
+                                          team_gamelog_table[1,])
+    team_gamelog_table = team_gamelog_table[2:nrow(team_gamelog_table),]
+    colnames(team_gamelog_table)[which(colnames(team_gamelog_table) %in% c('', 'NA'))] = c('Time', 'Boxscore', 'Result', 'Game_Location')
+    team_gamelog_table = team_gamelog_table %>% filter(as.numeric(Week) <= ifelse(y <= 2020, 17, 18) & Opp != 'Bye Week') %>%
+      rename(Opp_FullName = Opp) %>%
+      mutate(Opp_FullName = ifelse(Opp_FullName == 'Washington Football Team', 'Washington Commanders', Opp_FullName),
+             Time = str_extract(Time, '[0-9]+:[0-9]+(PM|AM)'),
+             time_parsed = parse_date_time(Time, orders = "I:Mp"),
+             Time_of_Day = case_when(hour(time_parsed) < 11 ~ 'Morning',
+                                     hour(time_parsed) < 15 ~ 'Early Window',
+                                     hour(time_parsed) < 19 ~ 'Late Window',
+                                     TRUE ~ 'Night'),
+             Win = ifelse(Result == 'W', 1, 0),
+             Game_Location = ifelse(Game_Location == '@', 'Away', 'Home'),
+             OT = ifelse(OT == 'OT', 1, 0),
+             Differential = as.numeric(Score_Tm) - as.numeric(Score_Opp),
+             Month_Name = trimws(gsub('[0-9]+','',Date)),
+             Month = str_pad(match(Month_Name, month.name), width = 2, side = 'left', pad = '0')) %>%
+      mutate(across(
+        .cols = matches("Offense|Defense"),
+        .fns = ~ as.numeric(ifelse(.x == "", 0, .x))
+      )
+      ) %>% select(-Rec, -Score_Tm, -Score_Opp, -Time, -time_parsed, -Result, -Month_Name, -Boxscore, -`Expected Points_Offense`, -`Expected Points_Defense`, -`Expected Points_Sp. Tms`)
+    
+    
+    return(team_gamelog_table)
+    
+  }
 }
 
 get_target_rankings = function(df, y, t, injuries)
@@ -687,6 +637,7 @@ get_qb_list = function()
     if (any(str_detect(player_list %>% html_nodes("p") %>% as.character(), 'block traffic')))
     {
       print("Site detected scraping. Try again in one hour.")
+      Sys.sleep(65*60)
       break
     }
     
@@ -718,7 +669,7 @@ get_qb_gamelog = function(qb_list, y)
   if (any(str_detect(game_log_html %>% html_nodes("p") %>% as.character(), 'block traffic')))
   {
     print("Site detected scraping. Try again in one hour.")
-    Sys.sleep(65)
+    Sys.sleep(65*60)
   }
   
   if(length(game_log_html %>% html_nodes(paste0('td[data-stat="reason"]')) %>% html_text(trim = TRUE)>0))

@@ -127,8 +127,12 @@ columns_aligned = lapply(gamelogs, function(df) {
 })
 gamelogs_df = bind_rows(columns_aligned)
 
+
 gamelogs_df = gamelogs_df %>% arrange(Week) %>%
-        select(player_id, Name, Position, Season, Gtm, Week, Date, Team, Opp, Game_Location, Month, day_of_week, Win, Differential, Active, GS, everything())
+        select(player_id, Name, Position, Season, Gtm, Week, Date, Team, Active, GS, everything())
+
+#remove the team/game columns because we will get that from the team gamelogs:
+gamelogs_df = gamelogs_df %>% select(-contains('Win'), -contains('Differential'), -Date, -day_of_week, -Opp, -Game_Location, -Month)
 
 print(Sys.time() - t1)
 
