@@ -21,10 +21,13 @@ team_cols = c('Win', 'Differential')
 in_season_calculation_columns = colnames(player_gamelogs)[which(str_detect(colnames(player_gamelogs), 'Cumulative_|Avg_|Last3_|Median_|Max_|Min_|_Per_|SD_|Lag|This_Season|Pct'))]
 columns_to_use = setdiff(colnames(player_gamelogs), c(basic_cols, team_cols, in_season_calculation_columns))
 
+
 t1 = Sys.time()
-grouped_table = player_gamelogs %>% select(player_id, Name, Season, all_of(columns_to_use)) %>%
+grouped_table = player_gamelogs %>% select(player_id, Name, Season, Team, all_of(columns_to_use)) %>%
   group_by(player_id, Name, Season) %>%
-   summarise(across(
+   summarise(
+     Teams = paste(Team, collapse = ","),
+     across(
     all_of(columns_to_use),
     .fns = list(
       sum = ~sum(.x, na.rm = TRUE),

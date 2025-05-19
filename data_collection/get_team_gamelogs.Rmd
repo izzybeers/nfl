@@ -1,0 +1,147 @@
+---
+title: "Team Gamelogs"
+author: "Izzy Beers"
+date: "`r Sys.time()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo =  FALSE, warning = FALSE, message = FALSE)
+```
+
+```{r}
+library(stringr)
+library(lubridate)
+library(dplyr)
+source('global.R')
+start_year = 2020
+end_year = 2024
+
+```
+ 
+ 
+```{r}
+start = 1
+
+team_abbreviations = team_lookup_table %>% select(FullName, Team, Alternate_Abbr)
+
+failed_teams = c()
+team_gamelog_table = data.frame(rbind())
+for(t in start:nrow(team_abbreviations))
+{
+  link_abbr = team_abbreviations$Alternate_Abbr[t]
+  team = team_abbreviations$Team[t]
+  print(team)
+  for (y in start_year:end_year)
+  {
+    print(y)
+    url = paste0("https://www.pro-football-reference.com/teams/",link_abbr,"/",y,".htm#all_games")
+   
+    team_gamelogs = tryCatch({
+       get_team_game_logs(url = url)
+      }, error = function(e) {
+        message("Error encountered. Waiting 5 minutes before retrying...")
+        Sys.sleep(300)
+        tryCatch({
+          get_team_game_logs(url = url)
+        }, error = function(e2) {
+          message("Second attempt failed.")
+          failed_teams = c(failed_teams, paste(team, y))
+          return(NULL)
+        })
+      })
+    
+    team_gamelogs$Team_FullName = team_abbreviations_table$FullName[t]
+    team_gamelogs$Team = team
+    team_gamelogs$Season = y
+    team_gamelogs$Opp = as.character(unlist(sapply(team_gamelogs$Opp_FullName, function(x) team_abbreviations$Team[team_abbreviations$FullName == x])))
+    
+    team_gamelogs = team_gamelogs %>% select(Team, Season, Week, Date, Month, Day, Time_of_Day, Game_Location, Opp, Win, Differential, OT, everything(), Team_FullName, Opp_FullName)
+    
+    team_gamelogs$Gtm = 1:nrow(team_gamelogs)
+    basic_cols = c('Team', 'Season', 'Week', 'Gtm', 'Day', 'Date', 'OT', 'Game_Location', 'Opp', 'Team_FullName', 'Opp_FullName', 'Month', 'Day', 'Time_of_Day', 'Game_Location')
+    team_cols = setdiff(colnames(team_gamelogs), basic_cols)
+    team_gamelogs = team_gamelogs %>% get_cumulative(last3 = FALSE, skip = basic_cols, team = team_cols)
+    team_gamelogs = team_gamelogs %>% get_cumulative(last3 = TRUE, skip = c(basic_cols, colnames(team_gamelogs)[str_detect(colnames(team_gamelogs), 'Cumulative_|Avg_|Median_|Min_|Max_|SD_')]), team = team_cols)
+    
+    date_numerical = as.Date(paste0(ifelse(team_gamelogs$Month == '01', team_gamelogs$Season + 1, team_gamelogs$Season),'-', team_gamelogs$Month, '-', str_extract(team_gamelogs$Date, '[0-9]+')))
+    d = c(NA, diff(date_numerical))
+    team_gamelogs$Short_Week = ifelse(d < 6, 1, 0)
+    team_gamelogs$Long_Week = ifelse(d > 8, 1, 0)
+    
+      
+    team_gamelog_table = rbind(team_gamelog_table, team_gamelogs)
+    
+    wait = runif(1,2,4)
+    Sys.sleep(wait)
+    
+  }
+}
+
+team_gamelog_table = unique(team_gamelog_table)
+
+
+#next steps
+#pull in starters
+#take team stuff out of player gamelogs
+ 
+
+```
+
+```{r}
+
+in_season_calculation_columns = colnames(team_gamelog_table)[which(str_detect(colnames(team_gamelog_table), 'Cumulative_|Avg_|Last3_|Median_|Max_|Min_|_Per_|SD_|Lag|This_Season|Pct'))]
+
+uninformative_stats_results = remove_uninformative_stats(df = team_gamelog_table, column_list = setdiff(colnames(team_gamelog_table), c(basic_cols, in_season_calculation_columns)))
+
+columns_to_remove = uninformative_stats_results[[1]]
+columns_0_1 = uninformative_stats_results[[2]]
+low_medians = uninformative_stats_results[[3]]
+
+team_gamelog_table = team_gamelog_table %>% conditionally_remove(columns_to_remove)
+if(length(columns_0_1) > 0)
+{
+  team_gamelog_table = team_gamelog_table %>% conditionally_remove(colnames(team_gamelog_table)[which(colnames(team_gamelog_table) %in% paste0('SD_', columns_0_1))])
+  team_gamelog_table = team_gamelog_table %>% conditionally_remove(colnames(team_gamelog_table)[which(colnames(team_gamelog_table) %in% paste0('Last3_SD_', columns_0_1))])
+  team_gamelog_table = team_gamelog_table %>% conditionally_remove(colnames(team_gamelog_table)[which(colnames(team_gamelog_table) %in% paste0('Median_', columns_0_1))])
+  team_gamelog_table = team_gamelog_table %>% conditionally_remove(colnames(team_gamelog_table)[which(colnames(team_gamelog_table) %in% paste0('Last3_Median_', columns_0_1))])
+  team_gamelog_table = team_gamelog_table %>% conditionally_remove(colnames(team_gamelog_table)[which(colnames(team_gamelog_table) %in% paste0('Max_', columns_0_1))])
+  team_gamelog_table = team_gamelog_table %>% conditionally_remove(colnames(team_gamelog_table)[which(colnames(team_gamelog_table) %in% paste0('Last3_Max_', columns_0_1))])
+  team_gamelog_table = team_gamelog_table %>% conditionally_remove(colnames(team_gamelog_table)[which(colnames(team_gamelog_table) %in% paste0('Min_', columns_0_1))])
+  team_gamelog_table = team_gamelog_table %>% conditionally_remove(colnames(team_gamelog_table)[which(colnames(team_gamelog_table) %in% paste0('Last3_Min_', columns_0_1))])
+}
+if(length(low_medians) > 0)
+{
+  team_gamelog_table = team_gamelog_table %>% conditionally_remove(colnames(team_gamelog_table)[which(colnames(team_gamelog_table) %in% paste0('Median_', low_medians))])
+  team_gamelog_table = team_gamelog_table %>% conditionally_remove(colnames(team_gamelog_table)[which(colnames(team_gamelog_table) %in% paste0('Last3_Median_', low_medians))])
+  team_gamelog_table = team_gamelog_table %>% conditionally_remove(colnames(team_gamelog_table)[which(colnames(team_gamelog_table) %in% paste0('Max_', columns_0_1))])
+  team_gamelog_table = team_gamelog_table %>% conditionally_remove(colnames(team_gamelog_table)[which(colnames(team_gamelog_table) %in% paste0('Last3_Max_', columns_0_1))])
+}
+
+team_gamelog_table = team_gamelog_table %>%
+  rename('Pct_Win' = 'Avg_Win')
+
+team_gamelog_table = team_gamelog_table %>%
+  group_by(Season, Week) %>%
+  mutate(Rank_Offensive_Yards_Season = dense_rank(desc(Cumulative_Offense_TotYd)),
+         Rank_Passing_Yards_Season = dense_rank(desc(Cumulative_Offense_PassY)),
+         Rank_Rushing_Yards_Season = dense_rank(desc(Cumulative_Offense_RushY)),
+         Rank_Offensive_Yards_Last3 = dense_rank(desc(Last3_Cumulative_Offense_TotYd)),
+         Rank_Passing_Yards_Last3 = dense_rank(desc(Last3_Cumulative_Offense_PassY)),
+         Rank_Rushing_Yards_Last3 = dense_rank(desc(Last3_Cumulative_Offense_RushY)),
+         Rank_Defense_Total_Yards_Allowed_Season = dense_rank(desc(Cumulative_Defense_TotYd)),
+         Rank_Defense_Passing_Yards_Allowed_Season = dense_rank(desc(Cumulative_Defense_PassY)),
+         Rank_Defense_Rushing_Yards_Allowed_Season = dense_rank(desc(Cumulative_Defense_RushY)),
+         Rank_Defense_Total_Yards_Allowed_Last3 = dense_rank(desc(Last3_Cumulative_Defense_TotYd)),
+         Rank_Defense_Passing_Yards_Allowed_Last3 = dense_rank(desc(Last3_Cumulative_Defense_PassY)),
+         Rank_Defense_Rushing_Yards_Allowed_Last3 = dense_rank(desc(Last3_Cumulative_Defense_RushY))   
+         ) %>%
+  ungroup()
+
+```
+
+```{r}
+
+saveRDS(team_gamelog_table, 'saved_data_files/team_gamelogs.rds')
+
+```
