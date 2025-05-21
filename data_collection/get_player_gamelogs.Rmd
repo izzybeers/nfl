@@ -146,11 +146,12 @@ saveRDS(gamelogs_df, 'backup/gamelogs_initial.rds')
 #2. For stats with very low medians, like number of touchdowns (which are mostly 0 or 1, and in very few cases at least 2), no reason to have min or median. Only cumulative, mean, max and maybe sd are useful.
 #3. Any columns that are all NA or only have one unique value will be removed.
 
-uninformative_stats_results = remove_uninformative_stats(df = grouped_table, column_list = setdiff(colnames(gamelog_df), c(basic_cols, team_cols)))
+
+uninformative_stats_results = remove_uninformative_stats(df = gamelogs_df, column_list = setdiff(colnames(gamelogs_df), c(basic_cols, team_cols)))
 
 columns_to_remove = uninformative_stats_results[[1]]
-columns_0_1 = uninformative_stats_results[[2]]
-low_medians = uninformative_stats_results[[3]]
+columns_0_1 = setdiff(uninformative_stats_results[[2]], colnames(gamelogs_df)[str_detect(colnames(gamelogs_df), 'Cumulative_|Avg_|Last3_|Median_|Max_|Min_|_Per_|SD_|Lag|This_Season|Pct')])
+low_medians = setdiff(uninformative_stats_results[[3]], colnames(gamelogs_df)[str_detect(colnames(gamelogs_df), 'Cumulative_|Avg_|Last3_|Median_|Max_|Min_|_Per_|SD_|Lag|This_Season|Pct')])
 
 gamelogs_df = gamelogs_df %>% conditionally_remove(columns_to_remove)
 if(length(columns_0_1) > 0)
@@ -168,13 +169,12 @@ if(length(low_medians) > 0)
 {
   gamelogs_df = gamelogs_df %>% conditionally_remove(colnames(gamelogs_df)[which(colnames(gamelogs_df) %in% paste0('Median_', low_medians))])
   gamelogs_df = gamelogs_df %>% conditionally_remove(colnames(gamelogs_df)[which(colnames(gamelogs_df) %in% paste0('Last3_Median_', low_medians))])
-  gamelogs_df = gamelogs_df %>% conditionally_remove(colnames(gamelogs_df)[which(colnames(gamelogs_df) %in% paste0('Max_', columns_0_1))])
-  gamelogs_df = gamelogs_df %>% conditionally_remove(colnames(gamelogs_df)[which(colnames(gamelogs_df) %in% paste0('Last3_Max_', columns_0_1))])
+  gamelogs_df = gamelogs_df %>% conditionally_remove(colnames(gamelogs_df)[which(colnames(gamelogs_df) %in% paste0('Min_', columns_0_1))])
+  gamelogs_df = gamelogs_df %>% conditionally_remove(colnames(gamelogs_df)[which(colnames(gamelogs_df) %in% paste0('Last3_Min_', columns_0_1))])
 }
 
 gamelogs_df = gamelogs_df %>%
-  rename('Pct_Win' = 'Avg_Win',
-         'Pct_GS' = 'Avg_GS',
+  rename('Pct_GS' = 'Avg_GS',
          'Pct_Active' = 'Avg_Active')
       
 
