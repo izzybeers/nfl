@@ -1,0 +1,136 @@
+---
+title: "Get_Target_Rankings"
+author: "Izzy Beers"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+```
+
+```{r}
+source('global.R')
+player_gamelogs = readRDS('saved_data_files/player_gamelogs.rds')
+player_seasonal = readRDS('saved_data_files/player_end_of_season_summary_stats.rds')
+team_gamelogs = readRDS('saved_data_files/team_gamelogs.rds')
+
+```
+
+
+```{r}
+
+rankings_receiving = data.frame(rbind())
+rankings_rushing = data.frame(rbind())
+seasonal_rushing_table = data.frame(rbind())
+seasonal_receiving_table = data.frame(rbind())
+
+for (t in sort(unique(player_gamelogs$Team)))
+{
+  print(t)
+  for (y in sort(unique(player_gamelogs$Season)))
+  {
+    print(y)
+    this_team_gamelog = team_gamelogs %>% filter(Team == t & Season == y)
+    
+    #weekly gamelogs:
+    
+    receiving_subtable = player_gamelogs %>%
+      filter(Team == t & Season == y & !is.na(Receiving_Yds)) %>%
+      select(player_id, Name, Season, Team, Position, Week, contains('Receiving')) %>%
+      group_by(Week) %>%
+      mutate(Target_Rank_Median_Season = dense_rank(desc(Median_Receiving_Tgt)),
+                Receiving_Yards_Rank_Median_Season = dense_rank(desc(Median_Receiving_Yds)),
+                Target_Rank_Median_Last3 = dense_rank((desc(Last3_Median_Receiving_Tgt))),
+                Receiving_Yards_Rank_Median_Last3 = dense_rank(desc(Last3_Median_Receiving_Yds))) %>%
+      ungroup() %>%
+      left_join(this_team_gamelog %>% mutate(Week = as.numeric(Week)) %>% select(Week, Median_Offense_PassY, Last3_Median_Offense_PassY),join_by('Week')) %>%
+      mutate(Pct_Team_Receiving_Yds_Median_Season = Median_Receiving_Yds/Median_Offense_PassY,
+        Pct_Team_Receiving_Yds_Median_Last3 = Last3_Median_Receiving_Yds/Last3_Median_Offense_PassY) %>%
+      select(player_id, Name, Position, Season, Team, Week, Receiving_Tgt, Receiving_Yds, Last3_Median_Receiving_Tgt, Last3_Median_Receiving_Yds, Target_Rank_Median_Season, Receiving_Yards_Rank_Median_Season, Target_Rank_Median_Last3, Receiving_Yards_Rank_Median_Last3, Pct_Team_Receiving_Yds_Median_Season, Pct_Team_Receiving_Yds_Median_Last3) 
+    
+    rankings_receiving = rbind(rankings_receiving, receiving_subtable)
+  
+    
+    rushing_subtable_nonqb = player_gamelogs %>%
+      filter(Team == t & Season == y & !is.na(Rushing_Yds) & !str_detect('QB', Position)) %>%
+      select(player_id, Name, Position, Week, contains('Rushing')) %>%
+      group_by(Week) %>%
+      #Rushing attempts rankings shouldn't count qbs because qbs can rush whenever they want. The purpose of this is to show how often the play goes to them, so that only makes sense for RBs.
+      mutate(Rushing_Att_Rank_Median_Season = dense_rank(desc(Median_Rushing_Att)),
+             Rushing_Att_Rank_Median_Last3 = dense_rank((desc(Last3_Median_Rushing_Att)))) %>%
+      ungroup() %>%
+      select(player_id, Name, Position, Week, Rushing_Att, Last3_Median_Rushing_Att, Median_Rushing_Att, Rushing_Att_Rank_Median_Season, Rushing_Att_Rank_Median_Last3)
+    
+    rushing_subtable_all = player_gamelogs %>%
+      filter(Team == t & Season == y & !is.na(Rushing_Yds)) %>%
+      select(player_id, Name, Season, Team, Position, Week, contains('Rushing')) %>%
+      group_by(Week) %>%
+      #qbs can be included in rankings for rushing yards:
+      mutate(Rushing_Yards_Rank_Median_Season = dense_rank(desc(Median_Rushing_Yds)),
+            Rushing_Yards_Rank_Median_Last3 = dense_rank((desc(Last3_Median_Rushing_Yds)))) %>%
+      ungroup() %>%
+      select(player_id, Name, Position, Season, Team, Week, Rushing_Yds, Median_Rushing_Yds, Last3_Median_Rushing_Yds, Rushing_Yards_Rank_Median_Season, Rushing_Yards_Rank_Median_Last3)
+    
+    rushing_subtable = rushing_subtable_all %>%
+      left_join(rushing_subtable_nonqb %>% select(player_id, Week, Rushing_Att_Rank_Median_Season, Rushing_Att_Rank_Median_Last3), join_by('player_id', 'Week')) %>%
+      left_join(team_gamelogs %>% mutate(Week = as.numeric(Week)) %>% select(Week, Median_Offense_RushY, Last3_Median_Offense_RushY),join_by('Week')) %>%
+      mutate(Pct_Team_Receiving_Yds_Median_Season = Median_Rushing_Yds/Median_Offense_RushY,
+        Pct_Team_Receiving_Yds_Median_Last3 = Last3_Median_Rushing_Yds/Last3_Median_Offense_RushY) %>%
+      select(-Median_Offense_RushY, -Last3_Median_Offense_RushY)
+  
+    rankings_rushing = rbind(rankings_rushing, rushing_subtable)
+    
+    #seasonal table:
+    
+    team_stats_this_year = this_team_gamelog %>% group_by(Season) %>%
+      summarise(Total_Team_Pass_Yards = sum(Offense_PassY, na.rm = TRUE),
+                Total_Team_Rush_Yards = sum(Offense_RushY, na.rm = TRUE))
+    
+    seasonal_receiving_subtable = player_seasonal %>%
+      filter(Team == t & Season == y & !is.na(Receiving_Yds_median))
+  
+    active_all_weeks_receiving = seasonal_receiving_subtable %>% filter(Weeks_Active == 'All') %>% mutate(Pct_of_All_Receiving_Yds_Season = Receiving_Yds_sum/team_stats_this_year$Total_Team_Pass_Yards)
+    
+    not_active_all_weeks_receiving = data.frame(rbind())
+    for (p in seasonal_receiving_subtable %>% filter(Weeks_Active != 'All') %>% select(player_id) %>% distinct() %>% pull())
+    {
+      weeks_active = as.numeric(unlist(strsplit(seasonal_receiving_subtable$Weeks_Active[which(seasonal_receiving_subtable$player_id == p)], ',')))
+      team_gamelogs_subset = this_team_gamelog %>% filter(Week %in% weeks_active)
+      total_pass_yards = sum(team_gamelogs_subset$Offense_PassY, na.rm = TRUE)
+      not_active_all_weeks_receiving = rbind(not_active_all_weeks_receiving, seasonal_receiving_subtable[seasonal_receiving_subtable$player_id == p,] %>% mutate(Pct_of_All_Receiving_Yds_Season = Receiving_Yds_sum/total_pass_yards))
+    }
+    
+    seasonal_receiving_table = rbind(seasonal_receiving_table,
+                                     rbind(active_all_weeks_receiving, not_active_all_weeks_receiving) %>% select(player_id, Name, Season, Team,, Pct_of_All_Receiving_Yds_Season))
+    
+    
+    
+    seasonal_rushing_subtable = player_seasonal %>%
+      filter(Team == t & Season == y & !is.na(Rushing_Yds_median))
+  
+    active_all_weeks_rushing = seasonal_rushing_subtable %>% filter(Weeks_Active == 'All') %>% mutate(Pct_of_All_Rushing_Yds_Season = Rushing_Yds_sum/team_stats_this_year$Total_Team_Rush_Yards)
+    
+    not_active_all_weeks_rushing = data.frame(rbind())
+    for (p in seasonal_rushing_subtable %>% filter(Weeks_Active != 'All') %>% select(player_id) %>% distinct() %>% pull())
+    {
+      weeks_active = as.numeric(unlist(strsplit(seasonal_rushing_subtable$Weeks_Active[which(seasonal_rushing_subtable$player_id == p)], ',')))
+      team_gamelogs_subset = this_team_gamelog %>% filter(Week %in% weeks_active)
+      total_rush_yards = sum(team_gamelogs_subset$Offense_RushY, na.rm = TRUE)
+      not_active_all_weeks_rushing = rbind(not_active_all_weeks_rushing, seasonal_rushing_subtable[seasonal_rushing_subtable$player_id == p,] %>% mutate(Pct_of_All_Rushing_Yds_Season = Rushing_Yds_sum/total_pass_yards))
+    }
+    
+    seasonal_rushing_table = rbind(seasonal_rushing_table,
+                                   rbind(active_all_weeks_rushing, not_active_all_weeks_rushing) %>% select(player_id, Name, Season, Team,, Pct_of_All_Rushing_Yds_Season))
+    
+  }
+}
+
+
+```
+
+```{r}
+
+saveRDS(list(rankings_receiving, rankings_rushing, seasonal_receiving_table, seasonal_rushing_table), 'saved_data_files/player_rankings_within_team.rds')
+
+```
