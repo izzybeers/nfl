@@ -140,5 +140,5 @@ team_gamelog_table = team_gamelog_table %>%
 ```{r}
 
 saveRDS(team_gamelog_table, 'saved_data_files/team_gamelogs.rds')
-
+'
 ```
