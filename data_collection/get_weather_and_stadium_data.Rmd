@@ -50,7 +50,7 @@ games_with_weather = games %>%
 Sys.time() - t1
 
 
-saveRDS(games_with_weather, 'saved_data_files/weather_data.rds')
+saveRDS(games_with_weather, 'saved_data_files/weather_and_stadium_data.rds')
 
 
 
