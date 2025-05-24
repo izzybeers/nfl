@@ -1,0 +1,41 @@
+---
+title: "get_weather_data"
+author: "Izzy Beers"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, waning = FALSE, message = FALSE)
+```
+
+```{r}
+source('global.R')
+library(tidyr)
+library(purrr)
+
+
+
+
+
+t1 = Sys.time()
+games_with_weather = readRDS('saved_data_files/team_gamelogs.rds') %>%
+  mutate(Stadium = ifelse(Game_Location == 'Away', Opp, Team),
+         Date = paste0(Season, '-', str_pad(match(word(Date, 1), month.name), 2, 'left', '0'), '-', str_pad(word(Date, 2), 2, 'left', '0'))) %>%
+  select(Season, Week, Date, Time_of_Day, Stadium) %>% distinct() %>% left_join(team_lookup_table %>% select(Team, Roof, weather_station_link), join_by('Stadium' == 'Team')) %>%
+  filter(Roof == 'Open') %>%
+  mutate(weather = pmap(list(Date, Time_of_Day, weather_station_link, Stadium),
+                        ~ get_weather(..1, ..2, station_link = ..3, stadium = ..4))) %>%
+  unnest_wider(weather, names_sep = "_") %>%
+  select(-weather_station_link, -Date, -Time_of_Day, -Roof) %>%
+  arrange(Season, Week)
+
+Sys.time() - t1
+
+
+saveRDS(games_with_weather, 'saved_data_files/weather_data.rds')
+
+
+
+
+```
