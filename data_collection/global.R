@@ -6,30 +6,42 @@ library(chromote)
 library(stringr)
 library(xml2)
 library(dplyr)
+library(lubridate)
 
 options(chromote.headless = "new")
 Sys.setenv(CHROMOTE_CHROME = "/Users/izzybeers/chrome-headless-shell/mac-136.0.7103.49/chrome-headless-shell-mac-x64/chrome-headless-shell")
 
 team_lookup_table = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vT9_LcNO2d8L5kzbJQZZti9kxfAZRFRAl2oJz5WlpusfvL1txbkc8OU6BSlB54TA9HCBHRlIxi9MpuT/pub?gid=0&single=true&output=csv')
 
-get_html_content = function(url, max_retries = 3) {
+get_html_content = function(url, max_retries = 3, skip_to_chromote = FALSE, extra_wait = 0) {
   retries = 0
  
 for (i in 1:max_retries) {
-  try_result = try({
-    session <- session(url, user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/113.0.0.0 Safari/537.36"))
-    page <- read_html(session)
-    return(page)  # Success — exit function
-  }, silent = TRUE)
+  if(!skip_to_chromote)
+  {
+    try_result = try({
+      session <- session(url, user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/113.0.0.0 Safari/537.36"))
+      page <- read_html(session)
+      if(length(html_children(page)) > 0)
+      {
+        return(page)  # Success — exit function
+      } else {
+        page = NULL
+        stop("Empty content detected — triggering fallback to Chromote")
+      }
+    }, silent = TRUE)
+  }
   
   # If the above failed, try with Chromote
   try_result = try({
     message(paste("Retry", i, "- falling back to Chromote"))
     b <- ChromoteSession$new()
     b$Page$navigate(url)
+    Sys.sleep(extra_wait) #if certain sites take a few more seconds to load before pulling result, like nfl's site
     result <- b$Runtime$evaluate("document.documentElement.outerHTML")
     html_content <- result$result$value
-    page <- read_html(html_content)
+    page = read_html(html_content)
+    
     return(page)  # Success — exit function
   })
 
@@ -558,7 +570,7 @@ get_team_game_logs = function(url)
         .cols = matches("Offense|Defense"),
         .fns = ~ as.numeric(ifelse(.x == "", 0, .x))
       )
-      ) %>% select(-Rec, -Score_Tm, -Score_Opp, -Time, -time_parsed, -Result, -Month_Name, -Boxscore, -`Expected Points_Offense`, -`Expected Points_Defense`, -`Expected Points_Sp. Tms`)
+      ) %>% select(-Rec, -Score_Tm, -Score_Opp, -time_parsed, -Result, -Month_Name, -Boxscore, -`Expected Points_Offense`, -`Expected Points_Defense`, -`Expected Points_Sp. Tms`)
     
     
     return(team_gamelog_table)
@@ -587,11 +599,8 @@ get_target_rankings = function(df, y, t, injuries)
   return(target_ranks)
 }
 
-get_weather = function(date, time_of_day, stadium)
+get_weather = function(date, time_of_day, station_link, stadium)
 {
-  weather_station_links = read.csv("https://docs.google.com/spreadsheets/d/e/2PACX-1vT9_LcNO2d8L5kzbJQZZti9kxfAZRFRAl2oJz5WlpusfvL1txbkc8OU6BSlB54TA9HCBHRlIxi9MpuT/pub?gid=1923508036&single=true&output=csv")
-  
-  station_link = weather_station_links$Link[which(weather_station_links$Team == stadium)]
   weather_doc = get_html_content(paste0(station_link,date))
   
   min_temp = weather_doc %>% html_node('.temp_mn .value') %>% html_text(trim = TRUE)
@@ -614,16 +623,26 @@ get_weather = function(date, time_of_day, stadium)
   
   timezone = ifelse(stadium %in% c('SEA','SFO','DEN'), 'Earlier', 'Later')
   
-  row_in_weather_data = which(weather_data$date == date & weather_data$stadium == stadium)
-  return(data.frame(
-    date = date,
-    stadium = stadium,
-    approx_temperature = ifelse(time_of_day == 'Night' & timezone == 'Later', min_temp,
-                                ifelse((time_of_day == 'Night' & timezone == 'Earlier') | time_of_day == 'Late Window' & timezone == 'Later',
-                                       mean_temp, max_temp))  %>% as.numeric(),
-    approx_visibility = visibility %>% as.numeric(),
-    Approx_Wind_Speed = mean_wind_speed %>% as.numeric())
-  )
+
+  approx_temperature = ifelse(time_of_day == 'Night' & timezone == 'Later', min_temp,
+                              ifelse((time_of_day == 'Night' & timezone == 'Earlier') | time_of_day == 'Late Window' & timezone == 'Later',
+                                     mean_temp, max_temp))  %>% as.numeric()
+  approx_visibility = visibility %>% as.numeric()
+  Approx_Wind_Speed = mean_wind_speed %>% as.numeric()
+
+  # return(data.frame(
+  #   date = date,
+  #   stadium = stadium,
+  #   approx_temperature = ifelse(time_of_day == 'Night' & timezone == 'Later', min_temp,
+  #                               ifelse((time_of_day == 'Night' & timezone == 'Earlier') | time_of_day == 'Late Window' & timezone == 'Later',
+  #                                      mean_temp, max_temp))  %>% as.numeric(),
+  #   approx_visibility = visibility %>% as.numeric(),
+  #   Approx_Wind_Speed = mean_wind_speed %>% as.numeric())
+  # # )
+  
+  return(list(approx_temperature = approx_temperature, 
+              approx_visibility = approx_visibility, 
+              approx_wind_speed = Approx_Wind_Speed))
 }
 
 
