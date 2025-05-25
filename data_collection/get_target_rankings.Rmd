@@ -11,9 +11,23 @@ knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
 
 ```{r}
 source('global.R')
+min_year = 2020
+min_year_final = 2022 #the actual model will be 2022-2024 but data collection 2020-2024
+max_year = 2024
 player_gamelogs = readRDS('saved_data_files/player_gamelogs.rds')
 player_seasonal = readRDS('saved_data_files/player_end_of_season_summary_stats.rds')
 team_gamelogs = readRDS('saved_data_files/team_gamelogs.rds')
+qb1_by_year = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vT9_LcNO2d8L5kzbJQZZti9kxfAZRFRAl2oJz5WlpusfvL1txbkc8OU6BSlB54TA9HCBHRlIxi9MpuT/pub?gid=1914165552&single=true&output=csv') %>% mutate(Temp = 1)
+
+```
+
+```{r}
+#STARTING QBS:
+
+qb_starters = player_gamelogs %>% filter(str_detect('QB', Position) & GS == 1 & Season >=  min_year_final) %>%
+  select(Season, Week, Team, player_id, Name)  %>%
+  left_join(qb1_by_year, by = c('Name' = 'Qb1', 'Season' = 'Season', 'Team' ='Team')) %>%
+  mutate(Qb1_starting = ifelse(!is.na(Temp), 1, 0)) %>% select(-Temp) %>% arrange(Season, Team, Week)
 
 ```
 
@@ -47,7 +61,8 @@ for (t in sort(unique(player_gamelogs$Team)))
       left_join(this_team_gamelog %>% mutate(Week = as.numeric(Week)) %>% select(Week, Median_Offense_PassY, Last3_Median_Offense_PassY),join_by('Week')) %>%
       mutate(Pct_Team_Receiving_Yds_Median_Season = Median_Receiving_Yds/Median_Offense_PassY,
         Pct_Team_Receiving_Yds_Median_Last3 = Last3_Median_Receiving_Yds/Last3_Median_Offense_PassY) %>%
-      select(player_id, Name, Position, Season, Team, Week, Receiving_Tgt, Receiving_Yds, Last3_Median_Receiving_Tgt, Last3_Median_Receiving_Yds, Target_Rank_Median_Season, Receiving_Yards_Rank_Median_Season, Target_Rank_Median_Last3, Receiving_Yards_Rank_Median_Last3, Pct_Team_Receiving_Yds_Median_Season, Pct_Team_Receiving_Yds_Median_Last3) 
+      select(player_id, Name, Position, Season, Team, Week, Target_Rank_Median_Season, Receiving_Yards_Rank_Median_Season, Target_Rank_Median_Last3, Receiving_Yards_Rank_Median_Last3, Pct_Team_Receiving_Yds_Median_Season, Pct_Team_Receiving_Yds_Median_Last3)  %>%
+      left_join(qb_starters %>% select(Season, Week, Team, Qb1_starting), join_by('Season' == 'Season', 'Week' == 'Week', 'Team' == 'Team'))
     
     rankings_receiving = rbind(rankings_receiving, receiving_subtable)
   
@@ -77,7 +92,9 @@ for (t in sort(unique(player_gamelogs$Team)))
       left_join(team_gamelogs %>% mutate(Week = as.numeric(Week)) %>% select(Week, Median_Offense_RushY, Last3_Median_Offense_RushY),join_by('Week')) %>%
       mutate(Pct_Team_Receiving_Yds_Median_Season = Median_Rushing_Yds/Median_Offense_RushY,
         Pct_Team_Receiving_Yds_Median_Last3 = Last3_Median_Rushing_Yds/Last3_Median_Offense_RushY) %>%
-      select(-Median_Offense_RushY, -Last3_Median_Offense_RushY)
+      select(player_id, Name, Position, Season, Team, Week, Rushing_Yards_Rank_Median_Season, Rushing_Yards_Rank_Median_Last3, Rushing_Att_Rank_Median_Season,
+             Rushing_Att_Rank_Median_Last3, Pct_Team_Receiving_Yds_Median_Season, Pct_Team_Receiving_Yds_Median_Last3)  %>%
+      left_join(qb_starters %>% select(Season, Week, Team, Qb1_starting), join_by('Season' == 'Season', 'Week' == 'Week', 'Team' == 'Team'))
   
     rankings_rushing = rbind(rankings_rushing, rushing_subtable)
     
@@ -102,7 +119,7 @@ for (t in sort(unique(player_gamelogs$Team)))
     }
     
     seasonal_receiving_table = rbind(seasonal_receiving_table,
-                                     rbind(active_all_weeks_receiving, not_active_all_weeks_receiving) %>% select(player_id, Name, Season, Team,, Pct_of_All_Receiving_Yds_Season))
+                                     rbind(active_all_weeks_receiving, not_active_all_weeks_receiving) %>% select(player_id, Name, Season, Team, Pct_of_All_Receiving_Yds_Season))
     
     
     
