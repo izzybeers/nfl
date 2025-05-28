@@ -15,9 +15,6 @@ library(tidyr)
 library(purrr)
 
 
-
-
-
 t1 = Sys.time()
 games = readRDS('saved_data_files/team_gamelogs.rds') %>%
   mutate(Stadium = ifelse(Game_Location == 'Away', Opp, Team),
@@ -36,7 +33,7 @@ games = readRDS('saved_data_files/team_gamelogs.rds') %>%
   ) %>%
   mutate(Same_Division = ifelse(Division == Opp_Division, 1, 0),
          Same_Conference = ifelse(Conference == Opp_Conference, 1, 0),
-         Long_Travel = ifelse(Stadium_Coast != '' & Coast != '' & Stadium_Coast != Coast, 1, 0),
+         Long_Travel = ifelse((Stadium_Coast != '' & Coast != '' & Stadium_Coast != Coast) | International == 1, 1, 0),
          Familiar_Grass_Type = ifelse(Grass_Type == Home_Grass_Type, 1, 0),
          Familiar_Roof_Type = ifelse(Roof == Home_Roof, 1, 0)) %>%
   select(-Home_Grass_Type, -Home_Roof)
