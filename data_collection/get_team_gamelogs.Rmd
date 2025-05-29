@@ -172,14 +172,10 @@ team_gamelog_table = team_gamelog_table %>%
   select(Team, Season, Week, Date, Game_Location, Opp, International)
 
 
-
-
-
-
-
 ```
+
 ```{r}
 
 saveRDS(team_gamelog_table, 'saved_data_files/team_gamelogs.rds')
-'
+
 ```

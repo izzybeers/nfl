@@ -364,20 +364,24 @@ get_game_log = function(player_row, yr, wk = NULL, gamelog_table_tag, gamelog_pl
     gamelog_table = gamelog_table %>% mutate(Playoffs = 0)
     
     
-    if(!is.null(gamelog_playoffs_table) && nrow(gamelog_table) > 0)
+    if(!is.null(gamelog_playoffs_table) && nrow(gamelog_playoffs_table) > 0)
     {
       playoffs_table = prepare_gamelog_table(df = gamelog_playoffs_table,
                                              df_advanced_rr = gamelog_advanced_playoffs_rushing_table,
                                              df_advanced_p = gamelog_advanced_playoffs_passing_table,
                                              player_row = player_row)
       
-      missing_columns_from_playoffs = setdiff(colnames(gamelog_table), colnames(playoffs_table))
-      playoffs_table[,missing_columns_from_playoffs] = NA
-      missing_columns_from_gamelog = setdiff(colnames(playoffs_table), colnames(gamelog_table))
-      gamelog_table[,missing_columns_from_gamelog] = NA
-      playoffs_table = playoffs_table %>% mutate(Playoffs = 1)
+      if(!is.null(playoffs_table) && nrow(playoffs_table) > 0)
+      {
       
-      gamelog_table = data.frame(rbind(gamelog_table, playoffs_table))
+        missing_columns_from_playoffs = setdiff(colnames(gamelog_table), colnames(playoffs_table))
+        playoffs_table[,missing_columns_from_playoffs] = NA
+        missing_columns_from_gamelog = setdiff(colnames(playoffs_table), colnames(gamelog_table))
+        gamelog_table[,missing_columns_from_gamelog] = NA
+        playoffs_table = playoffs_table %>% mutate(Playoffs = 1)
+        
+        gamelog_table = data.frame(rbind(gamelog_table, playoffs_table))
+      }
     }
 
     return(gamelog_table %>% filter(Week != '' & !is.na(Week)))
