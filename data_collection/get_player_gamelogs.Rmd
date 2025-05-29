@@ -16,21 +16,30 @@ source('global.R')
 ```{r}
 
 gamelog_html_table_tag = 'stats'
-gamelog_advanced_html_table_tag = 'adv_rushing_and_receiving'
-gamelog_advanced_passing_table_tag = 'passing_advanced'
+gamelog_html_playoff_table_tag = 'stats_playoffs'
 
-player_bios = readRDS("saved_data_files/full_list_player_bios.rds") %>% unique() %>% data.frame()
+gamelog_advanced_html_rushing_table_tag = 'adv_rushing_and_receiving'
+gamelog_advanced_html_passing_table_tag = 'passing_advanced'
+gamelog_advanced_playoffs_html_passing_table_tag = 'passing_advanced_post'
+gamelog_advanced_playoffs_html_rushing_table_tag = 'adv_rushing_and_receiving_post'
 
+wk = NULL
+
+basic_cols = c('player_id', 'Name', 'Position', 'Gtm', 'Week', 'Team','Season')
+
+player_bios = readRDS("saved_data_files/player_bios.rds") %>% unique() %>% data.frame()
+start = 701
 ```
 
 ```{r}
 t1 = Sys.time()
 
-start = 1
+
+counter = 0
 failed_player_ids = c()
 gamelogs = list()
 for(p in start:nrow(player_bios))
-# indices = sort(sample(1:nrow(player_bios), 200))
+# indices = sort(sample(1:nrow(player_bios), 10))
 # for(p in sort(indices)[start:length(indices)])
 {
   print(p)
@@ -38,21 +47,28 @@ for(p in start:nrow(player_bios))
   player_max_year = player_bios$max_year[p]
   for (y in player_min_year:player_max_year)
   {
+    print(y)
     gamelog_with_stats = tryCatch({
         get_game_log(player_row = player_bios[p,],
                      yr = y,
                      gamelog_table_tag = gamelog_html_table_tag,
-                     gamelog_advanced_table_tag = gamelog_advanced_html_table_tag,
-                     gamelog_advanced_passing_table_tag = gamelog_advanced_passing_table_tag)
+                     gamelog_playoffs_table_tag = gamelog_html_playoff_table_tag,
+                     gamelog_advanced_rushing_table_tag = gamelog_advanced_html_rushing_table_tag,
+                     gamelog_advanced_passing_table_tag = gamelog_advanced_html_passing_table_tag,
+                     gamelog_advanced_playoffs_passing_table_tag = gamelog_advanced_playoffs_html_passing_table_tag,
+                     gamelog_advanced_playoffs_rushing_table_tag = gamelog_advanced_playoffs_html_rushing_table_tag)
       }, error = function(e) {
         message("Error encountered. Waiting 5 minutes before retrying...")
         Sys.sleep(300)
         tryCatch({
-          get_game_log(player_row = player_bios[p,],
-                       yr = y,
-                       gamelog_table_tag = gamelog_html_table_tag,
-                       gamelog_advanced_table_tag = gamelog_advanced_html_table_tag,
-                       gamelog_advanced_passing_table_tag = gamelog_advanced_passing_table_tag)
+           get_game_log(player_row = player_bios[p,],
+                     yr = y,
+                     gamelog_table_tag = gamelog_html_table_tag,
+                     gamelog_playoffs_table_tag = gamelog_html_playoff_table_tag,
+                     gamelog_advanced_rushing_table_tag = gamelog_advanced_html_rushing_table_tag,
+                     gamelog_advanced_passing_table_tag = gamelog_advanced_html_passing_table_tag,
+                     gamelog_advanced_playoffs_passing_table_tag = gamelog_advanced_playoffs_html_passing_table_tag,
+                     gamelog_advanced_playoffs_rushing_table_tag = gamelog_advanced_playoffs_html_rushing_table_tag)
         }, error = function(e2) {
           message("Second attempt failed.")
           failed_player_ids = c(failed_player_ids, player_bios$player_id[p])
@@ -61,11 +77,9 @@ for(p in start:nrow(player_bios))
 })
     if(!is.null(gamelog_with_stats) && nrow(gamelog_with_stats) > 0)
     {
-      basic_cols = c('player_id', 'Name', 'Position', 'Month', 'Gtm', 'Week', 'day_of_week', 'Date', 'Team', 'Game_Location', 'Opp', 'Result', 'Season')
-      team_cols = c('Win', 'Differential')
-      gamelog_with_stats[which(gamelog_with_stats$Active == 0), setdiff(colnames(gamelog_with_stats), c(basic_cols, team_cols, 'Active'))] = NA
-      gamelog_with_stats = gamelog_with_stats %>% arrange(Week) %>% get_cumulative(last3 = FALSE, skip = basic_cols, team = team_cols)
-      gamelog_with_stats = gamelog_with_stats %>% get_cumulative(last3 = TRUE, skip = c(basic_cols, colnames(gamelog_with_stats)[str_detect(colnames(gamelog_with_stats), 'Cumulative_|Avg_|Median_|Min_|Max_|SD_')]), team = team_cols)
+      gamelog_with_stats[which(gamelog_with_stats$Active == 0), setdiff(colnames(gamelog_with_stats), c(basic_cols, 'Active'))] = NA
+      # gamelog_with_stats = gamelog_with_stats %>% arrange(Week) %>% get_cumulative(last3 = FALSE, skip = basic_cols, team = team_cols)
+      # gamelog_with_stats = gamelog_with_stats %>% get_cumulative(last3 = TRUE, skip = c(basic_cols, colnames(gamelog_with_stats)[str_detect(colnames(gamelog_with_stats), 'Cumulative_|Avg_|Median_|Min_|Max_|SD_')]), team = team_cols)
       
       if('Receiving_Yds' %in% colnames(gamelog_with_stats))
       {
@@ -89,6 +103,11 @@ for(p in start:nrow(player_bios))
              Passing_Yds_Lag3 = lag(Passing_Yds, n = 3, order_by = Week))
       }
       
+      if(!is.null(wk))
+      {
+        gamelog_with_stats =  gamelog_with_stats %>% filter(Week == wk)
+      }
+      
       
         
       gamelogs = append(gamelogs, list(gamelog_with_stats))
@@ -96,27 +115,30 @@ for(p in start:nrow(player_bios))
     wait = runif(1,2,4)
     Sys.sleep(wait)
   }
+  counter = counter + 1
   
-  if(p%%100 == 0)
+  if(counter%%100 == 0)
   {
     saveRDS(gamelogs, paste0('backup/sample_gamelogs_',p,'.rds'))
   }
   
   
 }
-
 saveRDS(gamelogs, 'backup/list_gamelogs.rds')
+Sys.time() - t1
 ```
 
 ```{r}
-gamelogs = list()
-for (i in 1:12)
-{
-  g = readRDS(paste0('backup/sample_gamelogs_', i*100,'.rds'))
-  gamelogs = append(gamelogs, g)
-}
-gamelogs = append(gamelogs, readRDS('backup/sample_gamelogs.rds'))
-gamelogs = unique(gamelogs)
+
+#if the code above cxrashed a few times and we have to retrieve in pieces:
+# gamelogs = list()
+# for (i in 1:12)
+# {
+#   g = readRDS(paste0('backup/sample_gamelogs_', i*100,'.rds'))
+#   gamelogs = append(gamelogs, g)
+# }
+# gamelogs = append(gamelogs, readRDS('backup/sample_gamelogs.rds'))
+# gamelogs = unique(gamelogs)
 
 all_columns = unique(unlist(sapply(gamelogs, colnames)))
 columns_aligned = lapply(gamelogs, function(df) {
@@ -128,15 +150,26 @@ columns_aligned = lapply(gamelogs, function(df) {
 gamelogs_df = bind_rows(columns_aligned)
 
 
-gamelogs_df = gamelogs_df %>% arrange(Week) %>%
-        select(player_id, Name, Position, Season, Gtm, Week, Date, Team, Active, GS, everything())
+gamelogs_df = gamelogs_df %>% arrange(player_id, Season, Week) %>%
+        select(player_id, Name, Position, Season, Gtm, Week, Date, Team, Active, GS, everything(), -Date, -day_of_week, -Opp, -Game_Location, -Month)
 
-#remove the team/game columns because we will get that from the team gamelogs:
-gamelogs_df = gamelogs_df %>% select(-contains('Win'), -contains('Differential'), -Date, -day_of_week, -Opp, -Game_Location, -Month)
+saveRDS(gamelogs_df, 'backup/gamelogs_initial.rds')
+
+```
+
+
+```{r}
+
+t1 = Sys.time()
+
+final_player_gamelogs = gamelogs_df %>%
+  arrange(Season, player_id) %>%
+  group_by(Season, player_id) %>%
+  group_modify(~ compute_slider_cumulatives(.x, basic_cols)) %>%
+  ungroup()
 
 print(Sys.time() - t1)
 
-saveRDS(gamelogs_df, 'backup/gamelogs_initial.rds')
 ```
 
 ```{r}
@@ -147,7 +180,7 @@ saveRDS(gamelogs_df, 'backup/gamelogs_initial.rds')
 #3. Any columns that are all NA or only have one unique value will be removed.
 
 
-uninformative_stats_results = remove_uninformative_stats(df = gamelogs_df, column_list = setdiff(colnames(gamelogs_df), c(basic_cols, team_cols)))
+uninformative_stats_results = remove_uninformative_stats(df = gamelogs_df, column_list = setdiff(colnames(gamelogs_df), basic_cols))
 
 columns_to_remove = uninformative_stats_results[[1]]
 columns_0_1 = setdiff(uninformative_stats_results[[2]], colnames(gamelogs_df)[str_detect(colnames(gamelogs_df), 'Cumulative_|Avg_|Last3_|Median_|Max_|Min_|_Per_|SD_|Lag|This_Season|Pct')])

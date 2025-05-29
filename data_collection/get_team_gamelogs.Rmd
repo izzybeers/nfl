@@ -119,7 +119,8 @@ if(length(low_medians) > 0)
 }
 
 team_gamelog_table = team_gamelog_table %>%
-  rename('Pct_Win' = 'Avg_Win')
+  rename('Pct_Win' = 'Avg_Win') %>%
+  conditionally_remove(c('Avg_Playoffs', 'Last3_Avg_Playoffs', 'Cumulative_Playoffs', 'Last3_Cumulative_Playoffs'))
 
 team_gamelog_table = team_gamelog_table %>%
   group_by(Season, Week) %>%
