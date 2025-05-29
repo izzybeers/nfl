@@ -16,11 +16,15 @@ source('global.R')
 start_year = 2020
 end_year = 2024
 
+basic_cols = c('Team', 'Season', 'Week', 'Gtm', 'Day', 'Date', 'Time', 'OT', 'Game_Location', 'Opp', 'Team_FullName', 'Opp_FullName', 'Month', 'Time_of_Day')
+  
+
 ```
  
  
 ```{r}
 start = 1
+t1 = Sys.time()
 
 team_abbreviations = team_lookup_table %>% select(FullName, Team, Alternate_Abbr)
 
@@ -37,7 +41,7 @@ for(t in start:nrow(team_abbreviations))
     url = paste0("https://www.pro-football-reference.com/teams/",link_abbr,"/",y,".htm#all_games")
    
     team_gamelogs = tryCatch({
-       get_team_game_logs(url = url)
+       get_team_game_logs(url = url, y = y)
       }, error = function(e) {
         message("Error encountered. Waiting 5 minutes before retrying...")
         Sys.sleep(300)
@@ -58,16 +62,7 @@ for(t in start:nrow(team_abbreviations))
     team_gamelogs = team_gamelogs %>% select(Team, Season, Week, Date, Month, Day, Time, Time_of_Day, Game_Location, Opp, Win, Differential, OT, everything(), Team_FullName, Opp_FullName)
     
     team_gamelogs$Gtm = 1:nrow(team_gamelogs)
-    basic_cols = c('Team', 'Season', 'Week', 'Gtm', 'Day', 'Date', 'Time', 'OT', 'Game_Location', 'Opp', 'Team_FullName', 'Opp_FullName', 'Month', 'Time_of_Day')
     team_cols = setdiff(colnames(team_gamelogs), basic_cols)
-    team_gamelogs = team_gamelogs %>% get_cumulative(last3 = FALSE, skip = basic_cols, team = team_cols)
-    team_gamelogs = team_gamelogs %>% get_cumulative(last3 = TRUE, skip = c(basic_cols, colnames(team_gamelogs)[str_detect(colnames(team_gamelogs), 'Cumulative_|Avg_|Median_|Min_|Max_|SD_')]), team = team_cols)
-    
-    date_numerical = as.Date(paste0(ifelse(team_gamelogs$Month == '01', team_gamelogs$Season + 1, team_gamelogs$Season),'-', team_gamelogs$Month, '-', str_extract(team_gamelogs$Date, '[0-9]+')))
-    d = c(NA, diff(date_numerical))
-    team_gamelogs$Short_Week = ifelse(d < 6, 1, 0)
-    team_gamelogs$Long_Week = ifelse(d > 8, 1, 0)
-    
       
     team_gamelog_table = rbind(team_gamelog_table, team_gamelogs)
     
@@ -79,9 +74,17 @@ for(t in start:nrow(team_abbreviations))
 
 team_gamelog_table = unique(team_gamelog_table)
 
+Sys.time() - t1
 
+```
 
- 
+```{r}
+
+team_gamelog_table = team_gamelog_table %>%
+  arrange(Season, Team) %>%
+  group_by(Season, Team) %>%
+  group_modify(~ compute_slider_cumulatives(.x, basic_cols)) %>%
+  ungroup()
 
 ```
 
@@ -135,8 +138,46 @@ team_gamelog_table = team_gamelog_table %>%
          ) %>%
   ungroup()
 
+date_numerical = as.Date(paste0(ifelse(team_gamelog_table$Month == '01', team_gamelog_table$Season + 1, team_gamelog_table$Season),'-', team_gamelog_table$Month, '-', str_extract(team_gamelog_table$Date, '[0-9]+')))
+d = c(NA, diff(date_numerical))
+team_gamelog_table$Short_Week = ifelse(d < 6, 1, 0)
+team_gamelog_table$Long_Week = ifelse(d > 8, 1, 0)
+
 ```
 
+```{r}
+#Add whether game was international
+
+page = get_html_content(url = 'https://en.wikipedia.org/wiki/NFL_International_Series#Game_history') 
+
+tables = page %>% html_nodes('table.wikitable') %>% html_table(fill = TRUE)
+tables = tables[which(sapply(tables, function(x) all(c('Year', 'Date', 'Stadium') %in% colnames(x))))]
+
+international_games = lapply(tables, function(x) x %>%
+                               select(Year, Date, Designatedvisitor, `Designatedhome team`) %>%
+                               mutate(Year = as.numeric(Year))) %>%
+  bind_rows() %>%
+  filter(Year >= start_year) %>%
+  mutate(Hometeam = gsub('\\[[0-9]+\\]', '', `Designatedhome team`),
+         Awayteam = gsub('\\[[0-9]+\\]', '', `Designatedvisitor`)) %>%
+  left_join(team_lookup_table %>% select(FullName, Team) %>% rename('Awayteam_abbr' = 'Team'), join_by('Awayteam' == 'FullName')) %>%
+  left_join(team_lookup_table %>% select(FullName, Team) %>% rename('Hometeam_abbr' = 'Team'), join_by('Hometeam' == 'FullName')) %>%
+  select(-Designatedvisitor, -`Designatedhome team`, -Hometeam, -Awayteam)
+
+team_gamelog_table = team_gamelog_table %>%
+  left_join(international_games, join_by('Season' == 'Year', 'Date' == 'Date', 'Team' == 'Awayteam_abbr')) %>%
+  left_join(international_games, join_by('Season' == 'Year', 'Date' == 'Date', 'Team' == 'Hometeam_abbr')) %>%
+  mutate(International = ifelse(!is.na(Awayteam_abbr) | !is.na(Hometeam_abbr), 1, 0),
+         Home_Stadium = ifelse(Game_Location == 'Home' & International == 0, 1, 0)) %>%
+  select(Team, Season, Week, Date, Game_Location, Opp, International)
+
+
+
+
+
+
+
+```
 ```{r}
 
 saveRDS(team_gamelog_table, 'saved_data_files/team_gamelogs.rds')
