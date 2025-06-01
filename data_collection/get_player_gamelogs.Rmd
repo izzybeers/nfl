@@ -28,7 +28,7 @@ wk = NULL
 basic_cols = c('player_id', 'Name', 'Position', 'Gtm', 'Week', 'Team','Season')
 
 player_bios = readRDS("saved_data_files/player_bios.rds") %>% unique() %>% data.frame()
-start = 701
+start = 1
 ```
 
 ```{r}
@@ -58,23 +58,9 @@ for(p in start:nrow(player_bios))
                      gamelog_advanced_playoffs_passing_table_tag = gamelog_advanced_playoffs_html_passing_table_tag,
                      gamelog_advanced_playoffs_rushing_table_tag = gamelog_advanced_playoffs_html_rushing_table_tag)
       }, error = function(e) {
-        message("Error encountered. Waiting 5 minutes before retrying...")
-        Sys.sleep(300)
-        tryCatch({
-           get_game_log(player_row = player_bios[p,],
-                     yr = y,
-                     gamelog_table_tag = gamelog_html_table_tag,
-                     gamelog_playoffs_table_tag = gamelog_html_playoff_table_tag,
-                     gamelog_advanced_rushing_table_tag = gamelog_advanced_html_rushing_table_tag,
-                     gamelog_advanced_passing_table_tag = gamelog_advanced_html_passing_table_tag,
-                     gamelog_advanced_playoffs_passing_table_tag = gamelog_advanced_playoffs_html_passing_table_tag,
-                     gamelog_advanced_playoffs_rushing_table_tag = gamelog_advanced_playoffs_html_rushing_table_tag)
-        }, error = function(e2) {
-          message("Second attempt failed.")
           failed_player_ids = c(failed_player_ids, player_bios$player_id[p])
           return(NULL)
         })
-})
     if(!is.null(gamelog_with_stats) && nrow(gamelog_with_stats) > 0)
     {
       gamelog_with_stats[which(gamelog_with_stats$Active == 0), setdiff(colnames(gamelog_with_stats), c(basic_cols, 'Active'))] = NA
@@ -130,15 +116,14 @@ Sys.time() - t1
 
 ```{r}
 
-#if the code above cxrashed a few times and we have to retrieve in pieces:
-# gamelogs = list()
-# for (i in 1:12)
-# {
-#   g = readRDS(paste0('backup/sample_gamelogs_', i*100,'.rds'))
-#   gamelogs = append(gamelogs, g)
-# }
-# gamelogs = append(gamelogs, readRDS('backup/sample_gamelogs.rds'))
-# gamelogs = unique(gamelogs)
+#if the code above crashed a few times and we have to retrieve in pieces:
+gamelogs = list()
+for (i in 1:12)
+{
+  g = readRDS(paste0('backup/sample_gamelogs_', i*100,'.rds'))
+  gamelogs = append(gamelogs, g)
+}
+gamelogs = unique(gamelogs)
 
 all_columns = unique(unlist(sapply(gamelogs, colnames)))
 columns_aligned = lapply(gamelogs, function(df) {
@@ -155,6 +140,19 @@ gamelogs_df = gamelogs_df %>% arrange(player_id, Season, Week) %>%
 
 saveRDS(gamelogs_df, 'backup/gamelogs_initial.rds')
 
+gamelogs_df = readRDS('backup/gamelogs_initial.rds')
+
+```
+
+```{r}
+
+uninformative_stats_results = remove_uninformative_stats(df = gamelogs_df, column_list = setdiff(colnames(gamelogs_df), basic_cols))
+columns_to_remove = uninformative_stats_results[[1]]
+columns_0_1 = uninformative_stats_results[[2]]
+low_medians = uninformative_stats_results[[3]]
+
+gamelogs_df = gamelogs_df %>% conditionally_remove(columns_to_remove)
+
 ```
 
 
@@ -162,7 +160,7 @@ saveRDS(gamelogs_df, 'backup/gamelogs_initial.rds')
 
 t1 = Sys.time()
 
-final_player_gamelogs = gamelogs_df %>%
+gamelogs_df = gamelogs_df %>% 
   arrange(Season, player_id) %>%
   group_by(Season, player_id) %>%
   group_modify(~ compute_slider_cumulatives(.x, basic_cols)) %>%
@@ -180,13 +178,10 @@ print(Sys.time() - t1)
 #3. Any columns that are all NA or only have one unique value will be removed.
 
 
-uninformative_stats_results = remove_uninformative_stats(df = gamelogs_df, column_list = setdiff(colnames(gamelogs_df), basic_cols))
 
-columns_to_remove = uninformative_stats_results[[1]]
-columns_0_1 = setdiff(uninformative_stats_results[[2]], colnames(gamelogs_df)[str_detect(colnames(gamelogs_df), 'Cumulative_|Avg_|Last3_|Median_|Max_|Min_|_Per_|SD_|Lag|This_Season|Pct')])
-low_medians = setdiff(uninformative_stats_results[[3]], colnames(gamelogs_df)[str_detect(colnames(gamelogs_df), 'Cumulative_|Avg_|Last3_|Median_|Max_|Min_|_Per_|SD_|Lag|This_Season|Pct')])
 
-gamelogs_df = gamelogs_df %>% conditionally_remove(columns_to_remove)
+
+
 if(length(columns_0_1) > 0)
 {
   gamelogs_df = gamelogs_df %>% conditionally_remove(colnames(gamelogs_df)[which(colnames(gamelogs_df) %in% paste0('SD_', columns_0_1))])
@@ -243,9 +238,9 @@ summary_function = function(df, c, all_pos)
 }
 
 summary_table = rbind()
-for (c in setdiff(colnames(gamelogs_df), c('player_id', 'Name', 'Position', 'Season')))
+for (c in setdiff(colnames(gamelogs_df), basic_cols))
 {
-  summary_table = rbind(summary_table, summary_function(df = gamelogs_df, c = c, all_pos = sort(unique(unlist(strsplit(df$Position, '-|/'))))))
+  summary_table = rbind(summary_table, summary_function(df = gamelogs_df, c = c, all_pos = sort(unique(unlist(strsplit(gamelogs_df$Position, '-|/'))))))
 }
 summary_table = data.frame(summary_table)
 colnames(summary_table) = c('Colname', 'Class','unique_values', 'Mean', 'Median', 'Min', 'Max', 'Pct_nonmissing', all_pos)
@@ -293,6 +288,24 @@ gamelogs_df = gamelogs_df %>%
          Last3_Pct_Offensive_Snaps = `Last3_Cumulative_Snap Counts_OffSnp` / Last3_Cumulative_Total_Team_Off_Snaps,
          Last3_Pct_ST_Snaps = `Last3_Cumulative_Snap Counts_STSnp` / Last3_Cumulative_Total_Team_ST_Snaps,
          )
+
+```
+
+
+```{r}
+
+#duplicate removal
+
+duplicates = gamelogs_df %>% group_by(player_id, Name, Season, Week) %>% summarise(n = n()) %>% filter(n > 1)
+nrow(duplicates)
+for (d in 1:nrow(duplicates))
+{
+  #likely one of them is active and one is not
+  gamelogs_df = gamelogs_df %>% filter(!(player_id == duplicates$player_id[d] & Season == duplicates$Season[d] & Week == duplicates$Week[d] & Active == 0))
+}
+
+persisting_duplicates = gamelogs_df %>% group_by(player_id, Name, Season, Week) %>% summarise(n = n()) %>% filter(n > 1)
+nrow(persisting_duplicates)
 
 saveRDS(gamelogs_df, 'saved_data_files/player_gamelogs.rds')
 

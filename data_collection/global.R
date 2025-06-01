@@ -35,7 +35,7 @@ for (i in 1:max_retries) {
   
   # If the above failed, try with Chromote
   try_result = try({
-    message(paste("Retry", i, "- falling back to Chromote"))
+    message("Using chromote")
     b <- ChromoteSession$new()
     b$Page$navigate(url)
     Sys.sleep(extra_wait) #if certain sites take a few more seconds to load before pulling result, like nfl's site
@@ -148,7 +148,7 @@ get_player_bio = function(player_row)
   return(data.frame(name, birthday, height, weight, college, year_drafted, draft_round, draft_pick, original_draft_team))
 }
 
-prepare_gamelog_table = function(df, df_advanced_p = NULL, df_advanced_rr = NULL, player_row)
+prepare_gamelog_table = function(df, df_advanced_p = NULL, df_advanced_rr = NULL, player_row, yr)
   #this function takes a gamelog table, plus optional advanced passing tables and advanced rushing&receiving tables, and scrapes and cleans/prepares them
 {
     colnames(df) = ifelse(colnames(df) != '',
@@ -173,7 +173,7 @@ prepare_gamelog_table = function(df, df_advanced_p = NULL, df_advanced_rr = NULL
     }
     
     df = df[,-which(str_detect(colnames(df), '\\/|%'))] %>% conditionally_remove(c('Rk', 'Gcar'))
-    df = df %>% filter(Week != '' & !is.na(Week))
+    df = df %>% filter(Week != '' & !is.na(Week) & !str_detect(Week, '[A-Za-z]'))
     
     if (any(str_detect(colnames(df), 'Receiving') | str_detect(colnames(df), 'Rushing') |  str_detect(colnames(df), 'Passing')))
     {
@@ -218,7 +218,9 @@ prepare_gamelog_table = function(df, df_advanced_p = NULL, df_advanced_rr = NULL
       if(!is.null(df_advanced))
       {
         shared_columns = intersect(colnames(df), colnames(df_advanced))
-        combined_df = df  %>% left_join(df_advanced %>% select(-!!setdiff(shared_columns,'Gtm')), join_by('Gtm'))
+        combined_df = df  %>% left_join(df_advanced %>% select(-!!setdiff(shared_columns,c('Gtm', 'Team'))), join_by('Gtm', 'Team'))
+      } else {
+        combined_df = df
       }
       
       combined_df = combined_df[,which(colnames(combined_df) != 'NA')]
@@ -359,7 +361,8 @@ get_game_log = function(player_row, yr, wk = NULL, gamelog_table_tag, gamelog_pl
     gamelog_table = prepare_gamelog_table(df = gamelog_table,
                                           df_advanced_rr = gamelog_advanced_rushing_table,
                                           df_advanced_p = gamelog_advanced_passing_table,
-                                          player_row = player_row)
+                                          player_row = player_row,
+                                          yr = yr)
     
     gamelog_table = gamelog_table %>% mutate(Playoffs = 0)
     
@@ -369,7 +372,8 @@ get_game_log = function(player_row, yr, wk = NULL, gamelog_table_tag, gamelog_pl
       playoffs_table = prepare_gamelog_table(df = gamelog_playoffs_table,
                                              df_advanced_rr = gamelog_advanced_playoffs_rushing_table,
                                              df_advanced_p = gamelog_advanced_playoffs_passing_table,
-                                             player_row = player_row)
+                                             player_row = player_row,
+                                             yr = yr)
       
       if(!is.null(playoffs_table) && nrow(playoffs_table) > 0)
       {
