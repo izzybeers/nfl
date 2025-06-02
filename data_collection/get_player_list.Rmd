@@ -93,7 +93,6 @@ for(i in 1:nrow(model_players))
   Sys.sleep(wait)
 }
 
-
 ```
 
 ```{r}
