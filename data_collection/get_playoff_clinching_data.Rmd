@@ -257,7 +257,7 @@ for (y in min_season:max_season)
 
 ```{r}
 
-saveRDS(full_playoff_clinching_table, 'saved_data_files/playoff_clinching_table.rds)
+saveRDS(full_playoff_clinching_table, 'saved_data_files/playoff_clinching_table.rds')
 
 
 ```
