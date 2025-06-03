@@ -80,6 +80,18 @@ Sys.time() - t1
 
 ```{r}
 
+uninformative_stats_results = remove_uninformative_stats(df = team_gamelog_table, column_list = setdiff(colnames(team_gamelog_table), basic_cols))
+
+columns_to_remove = uninformative_stats_results[[1]]
+columns_0_1 = uninformative_stats_results[[2]]
+low_medians = uninformative_stats_results[[3]]
+
+team_gamelog_table = team_gamelog_table %>% conditionally_remove(columns_to_remove)
+
+```
+
+```{r}
+
 team_gamelog_table = team_gamelog_table %>%
   arrange(Season, Team) %>%
   group_by(Season, Team) %>%
@@ -90,15 +102,6 @@ team_gamelog_table = team_gamelog_table %>%
 
 ```{r}
 
-in_season_calculation_columns = colnames(team_gamelog_table)[which(str_detect(colnames(team_gamelog_table), 'Cumulative_|Avg_|Last3_|Median_|Max_|Min_|_Per_|SD_|Lag|This_Season|Pct'))]
-
-uninformative_stats_results = remove_uninformative_stats(df = team_gamelog_table, column_list = setdiff(colnames(team_gamelog_table), c(basic_cols, in_season_calculation_columns)))
-
-columns_to_remove = uninformative_stats_results[[1]]
-columns_0_1 = uninformative_stats_results[[2]]
-low_medians = uninformative_stats_results[[3]]
-
-team_gamelog_table = team_gamelog_table %>% conditionally_remove(columns_to_remove)
 if(length(columns_0_1) > 0)
 {
   team_gamelog_table = team_gamelog_table %>% conditionally_remove(colnames(team_gamelog_table)[which(colnames(team_gamelog_table) %in% paste0('SD_', columns_0_1))])
@@ -169,8 +172,8 @@ team_gamelog_table = team_gamelog_table %>%
   left_join(international_games, join_by('Season' == 'Year', 'Date' == 'Date', 'Team' == 'Awayteam_abbr')) %>%
   left_join(international_games, join_by('Season' == 'Year', 'Date' == 'Date', 'Team' == 'Hometeam_abbr')) %>%
   mutate(International = ifelse(!is.na(Awayteam_abbr) | !is.na(Hometeam_abbr), 1, 0),
-         Home_Stadium = ifelse(Game_Location == 'Home' & International == 0, 1, 0)) %>%
-  select(Team, Season, Week, Date, Game_Location, Opp, International)
+         Home_Stadium = ifelse(Game_Location == 'Home' & International == 0, 1, 0)) %>% select(-Awayteam_abbr, -Hometeam_abbr)
+
 
 
 ```

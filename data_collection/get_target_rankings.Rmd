@@ -90,10 +90,10 @@ for (t in sort(unique(player_gamelogs$Team)))
     rushing_subtable = rushing_subtable_all %>%
       left_join(rushing_subtable_nonqb %>% select(player_id, Week, Rushing_Att_Rank_Median_Season, Rushing_Att_Rank_Median_Last3), join_by('player_id', 'Week')) %>%
       left_join(team_gamelogs %>% mutate(Week = as.numeric(Week)) %>% select(Week, Median_Offense_RushY, Last3_Median_Offense_RushY),join_by('Week')) %>%
-      mutate(Pct_Team_Receiving_Yds_Median_Season = Median_Rushing_Yds/Median_Offense_RushY,
-        Pct_Team_Receiving_Yds_Median_Last3 = Last3_Median_Rushing_Yds/Last3_Median_Offense_RushY) %>%
+      mutate(Pct_Team_Rushing_Yds_Median_Season = Median_Rushing_Yds/Median_Offense_RushY,
+        Pct_Team_Rushing_Yds_Median_Last3 = Last3_Median_Rushing_Yds/Last3_Median_Offense_RushY) %>%
       select(player_id, Name, Position, Season, Team, Week, Rushing_Yards_Rank_Median_Season, Rushing_Yards_Rank_Median_Last3, Rushing_Att_Rank_Median_Season,
-             Rushing_Att_Rank_Median_Last3, Pct_Team_Receiving_Yds_Median_Season, Pct_Team_Receiving_Yds_Median_Last3)  %>%
+             Rushing_Att_Rank_Median_Last3, Pct_Team_Rushing_Yds_Median_Season, Pct_Team_Rushing_Yds_Median_Last3)  %>%
       left_join(qb_starters %>% select(Season, Week, Team, Qb1_starting), join_by('Season' == 'Season', 'Week' == 'Week', 'Team' == 'Team'))
   
     rankings_rushing = rbind(rankings_rushing, rushing_subtable)
