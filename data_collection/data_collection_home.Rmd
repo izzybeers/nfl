@@ -12,17 +12,25 @@ knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 
 ```{r}
 
-
+#gamelogs and stats:
 player_bios = readRDS('saved_data_files/player_bios.rds')
 player_gamelogs = readRDS('saved_data_files/player_gamelogs.rds')
 player_seasonal_stats = readRDS('saved_data_files/player_end_of_season_summary_stats.rds')
 team_gamelogs = readRDS('saved_data_files/team_gamelogs.rds')
 
+#target rankings:
 player_rankings = readRDS('saved_data_files/player_rankings_within_team.rds')
 player_receiving_rankings = player_rankings[[1]]
 player_rushing_rankings = player_rankings[[2]]
 player_receiving_seasonal_rankings = player_rankings[[3]]
 player_rushing_seasonal_rankings = player_rankings[[4]]
 
+#fields related to weather, stadium, location, date:
 weather_and_stadium_data = readRDS('saved_data_files/weather_and_stadium_data.rds')
+
+#fields related to whether team has clinched, has been eliminated, or has control over playoff fate in the next game (clinch or eliminate)
+playoff_clinching_data = readRDS('saved_data_files/playoff_clinching_table')
+
+#fields related to player injury status:
+injuries_data = readRDS('saved_data_files/injuries_data.rds')
 ```
