@@ -395,97 +395,97 @@ get_game_log = function(player_row, yr, wk = NULL, gamelog_table_tag, gamelog_pl
     }
 }
 
-
-get_cumulative = function(log, last3, skip, team)
-{
-  for (c in setdiff(colnames(log), skip))
-  {
-    rows = rbind()
-    for (g in log$Gtm)
-    {
-      if(g == 1) #first game, no historical data, NA for everything
-      {
-        result_sum = NA
-        result_avg = NA
-        result_median = NA
-        result_min = NA
-        result_max = NA
-        result_sd = NA
-      } else { #not game #1
-          if(last3 == TRUE)
-          {
-            if (g <= 4) #if there's only been 3 or less previous games, just take them all
-            {
-              previous_games = log %>% filter(Gtm < g)
-            }
-            else if (c %in% team) #team-based stats don't rely on whether player was active
-            {
-              previous_games = log %>% filter(Gtm < g & Gtm >= (g-3))
-            } else { #out of the past 5 games, choose the most recent 3 where player was active.
-              num_active_games = 0 #counter
-              games_back = 3
-              while(num_active_games < 3 & games_back <= 5)
-              {
-                new_g = g - games_back
-                previous_games = log %>% filter(Gtm >= max(new_g,1) & Gtm < g)
-                num_active_games = sum(previous_games$Active)
-                if(num_active_games < 3)
-                {
-                  games_back = games_back + 1
-                }
-              }
-            }
-            
-          } else {
-            
-            if (c %in% team)
-            {
-              previous_games = log %>% filter(Gtm < g)
-            } else { #player stats depend on whether player was active
-              previous_games = log %>% filter(Gtm < g & Active == 1)
-            }
-            
-          }
-        
-        column_values = previous_games %>% select(!!sym(c)) %>% pull()
-        
-        if(any(!is.na(column_values)))   
-        {
-          result_sum = column_values %>% sum(na.rm = TRUE)
-          result_avg = column_values %>% mean(na.rm = TRUE)
-          result_median = column_values %>% median(na.rm = TRUE)
-          result_min = column_values %>% min(na.rm = TRUE)
-          result_max = column_values %>% max(na.rm = TRUE)
-          result_sd = column_values %>% sd(na.rm = TRUE)
-        } else {
-          result_sum = NA
-          result_avg = NA
-          result_median = NA
-          result_min = NA
-          result_max = NA
-          result_sd = NA
-        }
-      }
-    rows = rbind(rows, c(result_sum, result_avg, result_median, result_min, result_max, result_sd))
-
-    }
-  
-    rows = rows %>% data.frame()
-    colnames(rows) = paste0(ifelse(last3 == TRUE, 'Last3_',''), c('Cumulative_','Avg_','Median_','Min_','Max_','SD_'), c)
-    for (new_colname in colnames(rows))
-    {
-      vals = rows[,new_colname]
-      log[[new_colname]] = vals
-    }
-    
-  }
-
-    return(log)
-  
-}
+# 
+# get_cumulative = function(log, last3, skip, team)
+# {
+#   for (c in setdiff(colnames(log), skip))
+#   {
+#     rows = rbind()
+#     for (g in log$Gtm)
+#     {
+#       if(g == 1) #first game, no historical data, NA for everything
+#       {
+#         result_sum = NA
+#         result_avg = NA
+#         result_median = NA
+#         result_min = NA
+#         result_max = NA
+#         result_sd = NA
+#       } else { #not game #1
+#           if(last3 == TRUE)
+#           {
+#             if (g <= 4) #if there's only been 3 or less previous games, just take them all
+#             {
+#               previous_games = log %>% filter(Gtm < g)
+#             }
+#             else if (c %in% team) #team-based stats don't rely on whether player was active
+#             {
+#               previous_games = log %>% filter(Gtm < g & Gtm >= (g-3))
+#             } else { #out of the past 5 games, choose the most recent 3 where player was active.
+#               num_active_games = 0 #counter
+#               games_back = 3
+#               while(num_active_games < 3 & games_back <= 5)
+#               {
+#                 new_g = g - games_back
+#                 previous_games = log %>% filter(Gtm >= max(new_g,1) & Gtm < g)
+#                 num_active_games = sum(previous_games$Active)
+#                 if(num_active_games < 3)
+#                 {
+#                   games_back = games_back + 1
+#                 }
+#               }
+#             }
+#             
+#           } else {
+#             
+#             if (c %in% team)
+#             {
+#               previous_games = log %>% filter(Gtm < g)
+#             } else { #player stats depend on whether player was active
+#               previous_games = log %>% filter(Gtm < g & Active == 1)
+#             }
+#             
+#           }
+#         
+#         column_values = previous_games %>% select(!!sym(c)) %>% pull()
+#         
+#         if(any(!is.na(column_values)))   
+#         {
+#           result_sum = column_values %>% sum(na.rm = TRUE)
+#           result_avg = column_values %>% mean(na.rm = TRUE)
+#           result_median = column_values %>% median(na.rm = TRUE)
+#           result_min = column_values %>% min(na.rm = TRUE)
+#           result_max = column_values %>% max(na.rm = TRUE)
+#           result_sd = column_values %>% sd(na.rm = TRUE)
+#         } else {
+#           result_sum = NA
+#           result_avg = NA
+#           result_median = NA
+#           result_min = NA
+#           result_max = NA
+#           result_sd = NA
+#         }
+#       }
+#     rows = rbind(rows, c(result_sum, result_avg, result_median, result_min, result_max, result_sd))
+# 
+#     }
+#   
+#     rows = rows %>% data.frame()
+#     colnames(rows) = paste0(ifelse(last3 == TRUE, 'Last3_',''), c('Cumulative_','Avg_','Median_','Min_','Max_','SD_'), c)
+#     for (new_colname in colnames(rows))
+#     {
+#       vals = rows[,new_colname]
+#       log[[new_colname]] = vals
+#     }
+#     
+#   }
+# 
+#     return(log)
+#   
+# }
 
 compute_slider_cumulatives <- function(df, basic_cols = c()) {
-  df <- df %>% arrange(Gtm)
+  df <- df %>% arrange(Week, Gtm)
   
   stat_cols <- df %>%
     select(where(is.numeric)) %>%
@@ -601,7 +601,7 @@ get_team_game_logs = function(url, y)
                                           team_gamelog_table[1,])
     team_gamelog_table = team_gamelog_table[2:nrow(team_gamelog_table),]
     colnames(team_gamelog_table)[which(colnames(team_gamelog_table) %in% c('', 'NA'))] = c('Time', 'Boxscore', 'Result', 'Game_Location')
-    team_gamelog_table = team_gamelog_table %>% filter(as.numeric(Week) <= ifelse(y <= 2020, 17, 18) & Opp != 'Bye Week') %>%
+    team_gamelog_table = team_gamelog_table %>% filter(Opp != 'Bye Week' & Opp != '') %>%
       rename(Opp_FullName = Opp) %>%
       mutate(Opp_FullName = ifelse(Opp_FullName == 'Washington Football Team', 'Washington Commanders', Opp_FullName),
              Time = str_extract(Time, '[0-9]+:[0-9]+(PM|AM)'),
@@ -616,12 +616,12 @@ get_team_game_logs = function(url, y)
              Differential = as.numeric(Score_Tm) - as.numeric(Score_Opp),
              Month_Name = trimws(gsub('[0-9]+','',Date)),
              Month = str_pad(match(Month_Name, month.name), width = 2, side = 'left', pad = '0'),
-             Week = case_when(Week == 'Wild Card' ~ ifelse(y <= 2020, 19, 18),
-                              Week == 'Division' ~ ifelse(y <= 2020, 20, 19),
-                              Week == 'Conf. Champ.' ~ ifelse(y <= 2020, 21, 20),
-                              Week == 'Superbowl' ~ ifelse(y <= 2020, 22, 21),
+             Week = case_when(Week == 'Wild Card' ~ ifelse(y <= 2020, 18, 19),
+                              Week == 'Division' ~ ifelse(y <= 2020, 19, 20),
+                              Week == 'Conf. Champ.' ~ ifelse(y <= 2020, 20, 21),
+                              Week == 'SuperBowl' ~ ifelse(y <= 2020, 21, 22),
                               .default = as.numeric(Week)),
-             Playoffs = ifelse(Week >= ifelse(y <= 2020, 19, 18), 1, 0)
+             Playoffs = ifelse(Week >= ifelse(y <= 2020, 18, 19), 1, 0)
              ) %>%
       mutate(across(
         .cols = matches("Offense|Defense"),
