@@ -427,7 +427,7 @@ leftover_touchdown = setdiff(colnames(touchdown_data), c(accounted_for_columns,
 
 #if you are ok with the leftover fields being removed:
 print(leftover_touchdown)
-touchdown_data = touchdown_data %>% select(-any_of(leftover_touchown))
+touchdown_data = touchdown_data %>% select(-any_of(leftover_touchdown))
 
 
 
