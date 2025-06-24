@@ -68,62 +68,62 @@ player_data = player_bios %>%
               select(-Name, -Season),
             join_by('player_id' == 'player_id', 'Season' == 'Year_To_Match')) %>%
   left_join(team_gamelogs %>%
-              select(Season, Team, Opp, Week, Date, Month, Day, Game_Location, Playoffs, matches('(Win)|(Differential)|(Offense)')) %>%
-              select(Season, Team, Opp, Week, Date, Month, Day, Game_Location, Playoffs, matches('Cumulative|Pct|Avg|Min|Max|Median|SD|Last3')) %>%
+              select(Season, Team, Opp, Week, Date, Month, Day, Time_of_Day, Game_Location, Playoffs, Short_Week, Long_Week, matches('(Win)|(Differential)|(Offense)')) %>%
+              select(Season, Team, Opp, Week, Date, Month, Day, Time_of_Day, Game_Location, Playoffs, Short_Week, Long_Week,  matches('Cumulative|Pct|Avg|Min|Max|Median|SD|Last3')) %>%
             rename_with(
-                .cols = matches('Offense|Win|Differential'),
+                .cols = matches('Offense|Win|Differential|Short|Long'),
                 .fn = ~paste0('Team_',.x)),
             join_by('Team' == 'Team', 'Season' == 'Season', 'Week' == 'Week')) %>%
   left_join(team_gamelogs %>%
-              select(Season, Team, Week, matches('(Win)|(Differential)|(Defense)')) %>%
-              select(Season, Team, Week, matches('Cumulative|Pct|Avg|Min|Max|Median|SD|Last3')) %>%
+              select(Season, Team, Week, Short_Week, Long_Week, matches('(Win)|(Differential)|(Defense)')) %>%
+              select(Season, Team, Week, Short_Week, Long_Week, matches('Cumulative|Pct|Avg|Min|Max|Median|SD|Last3')) %>%
               rename_with(
                 .cols = matches('Defense'),
                 .fn = ~paste0('Opp_',.x, '_Allowed')) %>%
               rename_with(
-                .cols = matches('Win|Differential'),
+                .cols = matches('Win|Differential|Short|Long'),
                 .fn = ~paste0('Opp_',.x)),
             join_by('Opp' == 'Team', 'Season' == 'Season', 'Week' == 'Week')) %>%
   #season-end stats for team:
   left_join(team_seasonal_stats %>%
-              select(Season, Team, matches('(Win)|(Differential)|(Offense)')) %>%
-              select(Season, Team, matches('Sum|Cumulative|Pct|Avg|Min|Max|Median|SD|Per')) %>%
+              select(Season, Team, Won_Superbowl, matches('(Win)|(Differential)|(Offense)')) %>%
+              select(Season, Team, Won_Superbowl, matches('Sum|Cumulative|Pct|Avg|Min|Max|Median|SD|Per')) %>%
               mutate(Year_To_Match = Season + 1) %>% select(-Season) %>%
               rename_with(
-                .cols = matches('(Win)|(Differential)|(Offense)'),
+                .cols = matches('(Win)|(Differential)|(Offense)|Superbowl'),
                 .fn = ~paste0('Team_Last_Season_', .x)
               ),
             join_by('Team' == 'Team', 'Season' == 'Year_To_Match')) %>%
    left_join(team_seasonal_stats %>%
-              select(Season, Team, matches('(Win)|(Differential)|(Offense)')) %>%
-              select(Season, Team, matches('Sum|Cumulative|Pct|Avg|Min|Max|Median|SD|Per')) %>%
+              select(Season, Team, Won_Superbowl, matches('(Win)|(Differential)|(Offense)')) %>%
+              select(Season, Team, Won_Superbowl, matches('Sum|Cumulative|Pct|Avg|Min|Max|Median|SD|Per')) %>%
               mutate(Year_To_Match = Season + 2) %>% select(-Season) %>%
               rename_with(
-                .cols = matches('(Win)|(Differential)|(Offense)'),
+                .cols = matches('(Win)|(Differential)|(Offense)|Superbowl'),
                 .fn = ~paste0('Team_Two_Seasons_Ago_', .x)
               ),
             join_by('Team' == 'Team', 'Season' == 'Year_To_Match')) %>%
    #season-end stats for opponent:
    left_join(team_seasonal_stats %>%
-              select(Season, Team, matches('(Win)|(Differential)|(Defense)')) %>%
-              select(Season, Team, matches('Sum|Cumulative|Pct|Avg|Min|Max|Median|SD|Per')) %>%
+              select(Season, Team, Won_Superbowl, matches('(Win)|(Differential)|(Defense)')) %>%
+              select(Season, Team, Won_Superbowl, matches('Sum|Cumulative|Pct|Avg|Min|Max|Median|SD|Per')) %>%
               mutate(Year_To_Match = Season + 1) %>% select(-Season) %>%
               rename_with(
                 .cols = matches('Defense'),
                 .fn = ~paste0('Opp_Last_Season_',.x, '_Allowed')) %>%
               rename_with(
-                .cols = matches('Win|Differential'),
+                .cols = matches('Win|Differential|Superbowl'),
                 .fn = ~paste0('Opp_Last_Season_',.x)),
             join_by('Opp' == 'Team', 'Season' == 'Year_To_Match')) %>%
    left_join(team_seasonal_stats %>%
-              select(Season, Team, matches('(Win)|(Differential)|(Defense)')) %>%
-              select(Season, Team, matches('Sum|Cumulative|Pct|Avg|Min|Max|Median|SD|Per')) %>%
+              select(Season, Team, Won_Superbowl, matches('(Win)|(Differential)|(Defense)')) %>%
+              select(Season, Team, Won_Superbowl, matches('Sum|Cumulative|Pct|Avg|Min|Max|Median|SD|Per')) %>%
               mutate(Year_To_Match = Season + 2) %>% select(-Season) %>%
              rename_with(
               .cols = matches('Defense'),
               .fn = ~paste0('Opp_Two_Seasons_Ago_',.x, '_Allowed')) %>%
               rename_with(
-                .cols = matches('Win|Differential'),
+                .cols = matches('Win|Differential|Superbowl'),
                 .fn = ~paste0('Opp_Two_Seasons_Ago_',.x)),
             join_by('Opp' == 'Team', 'Season' == 'Year_To_Match')) %>%
   left_join(player_receiving_rankings %>% select(-Name, -Position), join_by('player_id' == 'player_id', 'Season' == 'Season', 'Week' == 'Week', 'Team' == 'Team')) %>%
@@ -153,12 +153,24 @@ player_data = player_bios %>%
             join_by('Season' == 'Season', 'Week' == 'Week', 'Team' == 'Team')) %>%
   left_join(injuries_data, join_by('names' == 'Player', 'Week' == 'Week', 'Season' == 'Season')) %>%
   mutate(On_Injury_List = ifelse(is.na(On_Injury_List), 0, On_Injury_List),
+         Less_Practice = ifelse(is.na(Less_Practice), 0, Less_Practice),
+         Injury_Out = ifelse(Game_Status == 'Out', 1, 0),
+         Injury_Questionable = ifelse(Game_Status %in% c('Doubtful', 'Questionable'), 1, 0),
          Unfamiliar_Temperature = ifelse((Used_To_Cold == 0 & Roof == 'Open' & weather_approx_temperature < 30) |
                                          (Used_To_Hot == 1 & Roof == 'Open' & weather_approx_temperature > 80),
                                          1, 0),
          Opp_Unfamiliar_Temperature = ifelse((Opp_Used_To_Cold == 0 & Roof == 'Open' & weather_approx_temperature < 30) |
                                          (Opp_Used_To_Hot == 1 & Roof == 'Open' & weather_approx_temperature > 80),
-                                         1, 0)) 
+                                         1, 0),
+         Years_Since_Drafted = Season - year_drafted,
+         Stadium_Capacity = as.numeric(gsub(',', '', Stadium_Capacity)),
+         weight = as.numeric(weight),
+         player_id = as.character(player_id),
+         age = floor(as.numeric(difftime(paste0(ifelse(Month %in% c('01','02'), Season + 1, Season),'-',Month,'-', str_pad(str_extract(Date,'[0-9]+'), 2, 'left','0')), birthday, units = 'weeks')/52)),
+         game_on_birthday = ifelse(substring(player_data$birthday, 6, nchar(player_data$birthday)) == paste0(as.numeric(player_data$Month),'-', str_pad(str_extract(player_data$Date,'[0-9]+'), 2, 'left','0')), 1, 0),
+         Home_Stadium = ifelse(Stadium == Team, 1, 0),
+         Home = ifelse(Game_Location == 'Home', 1, 0)
+         ) %>% select(-Game_Status)
   
   
 
@@ -291,7 +303,6 @@ touchdown_data = remove_present_stats(df = touchdown_data,
 #any other columns to remove:
 
 
-#remember ot rerun targer rankings data to get corrected colnames\
 passing_data = remove_unwanted_columns(df = passing_data,
                                        regex = 'receiving|(team.*snaps)|((?<!opp_)rank_)|(pct_team)', colnames = NULL)
 
@@ -309,10 +320,11 @@ receiving_data = remove_unwanted_columns(df = receiving_data,
 ```{r}
 #universal columns for all models:
 basic_cols = c('player_id', 'names', 'positions', 'Gtm', 'Week', 'Team', 'Opp', 'Season', 'Date')
-player_bio_data = c('min_year', 'max_year', 'height', 'weight', 'college', 'year_drafted', 'draft_round', 'draft_pick', 'original_draft_team')
-game_info = c('Month', 'Day', 'Game_Location', 'Playoffs', 'International', 'Same_Conference', 'Same_Division')
-stadium_info = c('Stadium', 'Grass_Type', 'Roof', 'Familiar_Roof_Type', 'Familiar_Grass_Type', 'Altitude', 'Stadium_Capacity', 'Loudest_Stadiums', 'Long_Travel')
-injury_data = c('On_Injury_List', 'Less_Practice', 'Game_Status')
+player_bio_data = c('min_year', 'max_year', 'height', 'weight', 'college', 'Years_Since_Drafted', 'draft_round', 'draft_pick', 'original_draft_team', 'age')
+game_info = c('Month', 'Day', 'Home', 'Home_Stadium', 'Time_of_Day', 'Playoffs', 'International', 'Same_Conference', 'Same_Division', 'game_on_birthday', 'Team_Long_Week', 'Team_Short_Week', 'Opp_Long_Week', 'Opp_Short_Week', 'Long_Travel')
+misc_team_opp_info = c('Team_Last_Season_Won_Superbowl', 'Team_Two_Seasons_Ago_Won_Superbowl', 'Opp_Last_Season_Won_Superbowl', 'Opp_Two_Seasons_Ago_Won_Superbowl')
+stadium_info = c('Stadium', 'Grass_Type', 'Roof', 'Familiar_Roof_Type', 'Familiar_Grass_Type', 'Altitude', 'Stadium_Capacity', 'Loudest_Stadiums')
+injury_data = c('On_Injury_List', 'Less_Practice', 'Injury_Out', 'Injury_Questionable')
 weather_data = c(colnames(player_data)[str_detect(tolower(colnames(player_data)), 'weather')], 'Unfamiliar_Temperature', 'Opp_Unfamiliar_Temperature')
 playoff_clinching_data = c('Div_Ranking', 'Div_Pct_Wins', 'Already_Clinched_Playoff', 'Already_Clinched_Division', 'Already_Clinched_Seed1', 'Already_Eliminated', 'Already_Eliminated_Division', 'playoffs_at_stake', 'elimination_at_stake')
 qb_columns = c('Qb1_starting', 'Is_Qb1') # former for rushing/rec/td models, is_qb1 for passing model
@@ -322,6 +334,7 @@ accounted_for_columns = c('Passing_Yds', 'Rushing_Yds', 'Receiving_Yds', 'Total_
                           basic_cols,
                           player_bio_data,
                           game_info,
+                          misc_team_opp_info,
                           stadium_info,
                           injury_data,
                           weather_data,
@@ -373,7 +386,6 @@ touchdown_data_opp_recent_seasons = touchdown_data_all_stats_columns[[6]]
 ```
 
 
-fix the rank column, doesn't make sense to have _Allowed at the end of it
 
 
 ```{r}
@@ -435,10 +447,51 @@ touchdown_data = touchdown_data %>% select(-any_of(leftover_touchdown))
 
 ```{r}
 
-saveRDS(passing_data, '../model/data/passing_model_data.rds')
-saveRDS(rushing_data, '../model/data/rushing_model_data.rds')
-saveRDS(receiving_data, '../model/data/receiving_model_data.rds')
-saveRDS(touchdown_data, '../model/data/touchdown_model_data.rds')
+
+cols_to_force_numeric = c(passing_data_player_current_season,
+                          passing_data_player_recent_seasons,
+                          passing_data_team_current_season,
+                          passing_data_team_recent_seasons,
+                          passing_data_opp_current_season,
+                          passing_data_opp_recent_seasons,
+                          rushing_data_player_current_season,
+                          rushing_data_player_recent_seasons,
+                          rushing_data_team_current_season,
+                          rushing_data_team_recent_seasons,
+                          rushing_data_opp_current_season,
+                          rushing_data_opp_recent_seasons,
+                          receiving_data_player_current_season,
+                          receiving_data_player_recent_seasons,
+                          receiving_data_team_current_season,
+                          receiving_data_team_recent_seasons,
+                          receiving_data_opp_current_season,
+                          receiving_data_opp_recent_seasons,
+                          touchdown_data_player_current_season,
+                          touchdown_data_player_recent_seasons,
+                          touchdown_data_team_current_season,
+                          touchdown_data_team_recent_seasons,
+                          touchdown_data_opp_current_season,
+                          touchdown_data_opp_recent_seasons)
+
+passing_data[,which(colnames(passing_data) %in% cols_to_force_numeric)] = apply(passing_data[,which(colnames(passing_data) %in% cols_to_force_numeric)], 2, as.numeric)
+
+rushing_data[,which(colnames(rushing_data) %in% cols_to_force_numeric)] =  apply(rushing_data[,which(colnames(rushing_data) %in% cols_to_force_numeric)], 2, as.numeric)
+
+receiving_data[,which(colnames(receiving_data) %in% cols_to_force_numeric)] = apply(receiving_data[,which(colnames(receiving_data) %in% cols_to_force_numeric)], 2, as.numeric)
+
+touchdown_data[,which(colnames(touchdown_data) %in% cols_to_force_numeric)] = apply(touchdown_data[,which(colnames(touchdown_data) %in% cols_to_force_numeric)], 2, as.numeric)
+
+
+
+```
+
+
+```{r}
+
+saveRDS(passing_data, '../model/data/passing_preliminary_data.rds')
+saveRDS(rushing_data, '../model/data/rushing_preliminary_data.rds')
+saveRDS(receiving_data, '../model/data/receiving_preliminary_data.rds')
+saveRDS(touchdown_data, '../model/data/touchdown_preliminary_data.rds')
 
 
 saveRDS(list(basic_cols = intersect(basic_cols, colnames(passing_data)),
