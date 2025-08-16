@@ -553,13 +553,6 @@ for (c in columns_0_1)
 ```
 
 
-```{4}
-
-
-#to do:
-#give an option to choose this or that up front, like if 2 fields  are similar, like draft pick and draft year, and have it choose one automatically. Have a section in the rmd that illustrates this.
-#link back to main table / make dummy variables
-```
 
 
 
@@ -614,15 +607,15 @@ kable(touchdown_this_or_that_table, caption = "Touchdown: This or That?")
 iv_to_dummy = function(df, bins, response_vars, this_or_that_table)
 {
   new_dfs = list()
-  for (r in sort(response_vars))
+  for (r in response_vars)
   {
     cat('Response Variable:', r)
-    information_vars_used = bins %>% filter(Response == r) %>% select(Variable) %>% distinct() %>% pull()
+    information_vars_used = bins %>% filter(Response == r) %>% filter(display == 1) %>% select(Variable) %>% distinct() %>% pull()
     information_vars_used = setdiff(information_vars_used, c(this_or_that_table$option1, this_or_that_table$option2))
     information_vars_used = c(information_vars_used, this_or_that_table[,paste0('decision_',r)])
     #for the ones that did not score high on IV, I'll keep those in the model as is just in case the model sees a pattern in conjunction with other variables. But for the ones that did score high on IV, I will use the optimal bins.
     
-    df_this_r = df %>% select(-information_vars_used)
+    df_this_r = df %>% select(-na.omit(information_vars_used))
     for(v in information_vars_used)
     {
       cat('Variable:', v)
@@ -677,6 +670,7 @@ iv_to_dummy = function(df, bins, response_vars, this_or_that_table)
         
     }
     this_or_that_not_used = setdiff(c(this_or_that_table$option1, this_or_that_table$option2), this_or_that_table[,paste0('decision_',r)])
+    print(r)
     df_this_r = df_this_r %>% select(-any_of(c(this_or_that_not_used, setdiff(response_vars, r))))
     new_dfs = append(new_dfs, list(df_this_r))
   }
@@ -699,21 +693,17 @@ new_touchdown_data_test = iv_to_dummy(df = touchdown_data_test, bins = all_bins_
 
 ```{r}
 
-model_manual_remove = c('min_year', 'max_year')
-t1 = Sys.time()
-all_tunings_passing = rbind()
-for(p in 1:length(new_passing_data))
-{
-  df = new_passing_data[[p]] %>% select(-any_of(c(passing_data_column_categories$basic_cols, model_manual_remove, 'Passing_Yds')))
-  response = names(new_passing_data)[p]
-  print(response)
-  tuning = run_gbm(df, response, t = 5000, i_range = c(1,4,7), s_range = c(0.001, 0.01, 0.05, 0.1), n_range = 10, b_range = 0.7) %>% mutate(Response = response, prevalence = mean(df[,response]))
-  optimal_tuning = tuning[which.max(tuning$precision),]
-  all_tunings_passing = rbind(all_tunings, optimal_tuning)
-}
-Sys.time() - t1
-
+saveRDS(new_passing_data, 'data/model_ready_passing_train_df.rds')
+saveRDS(new_rushing_data, 'data/model_ready_rushing_train_df.rds')
+saveRDS(new_receiving_data, 'data/model_ready_receiving_train_df.rds')
+saveRDS(new_touchdown_data, 'data/model_ready_touchdown_train_df.rds')
+saveRDS(new_passing_data_test, 'data/model_ready_passing_test_df.rds')
+saveRDS(new_rushing_data_test, 'data/model_ready_rushing_test_df.rds')
+saveRDS(new_receiving_data_test, 'data/model_ready_receiving_test_df.rds')
+saveRDS(new_touchdown_data_test, 'data/model_ready_touchdown_test_df.rds')
 ```
+
+
 
 
 

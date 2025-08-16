@@ -1,0 +1,475 @@
+library(gbm3)
+library(stringr)
+
+#define functions for creating information value tables:
+
+create_iv_tables = function(df, response_var, var_list, column_categories)
+{
+  
+  all_bins = rbind()
+  all_ivs = rbind()
+  for(r in response_var)
+  {
+    for (var in var_list)
+    {
+      overall_mean = df %>% select(r) %>% pull() %>% mean()
+      
+      bins = woebin(df, y = r, x = var, bin_num_limit = 6, check_cate_num = FALSE, print_step = 0, print_info = FALSE) %>% data.frame() %>% select(!!sym(paste0(var, '.variable')), !!sym(paste0(var,'.bin')),!!sym(paste0(var,'.bin_iv')), !!sym(paste0(var,'.total_iv')), !!sym(paste0(var, '.posprob')), !!sym(paste0(var, '.count')))
+      colnames(bins) = c('Variable', 'Bin', 'Bin_IV', 'Total_IV', 'Pos_Prob', 'Bin_Count')
+      bins = bins %>% mutate(Response = r, overall_mean_response = overall_mean, display = ifelse(length(na.omit(unique(df[,var]))) >= 3, 1, 0))
+      ivs = bins %>% select(Variable, Total_IV, display) %>% distinct() %>% mutate(Response = r,
+                                                                                   overall_mean_response = overall_mean)
+      
+      if(var %in% column_categories$player_bio_data)
+      {
+        specific_count_field = 'player_id'
+      } else if(var %in% column_categories$stadium_info)
+      {
+        specific_count_field = 'Stadium'
+      } else {
+        specific_count_field = NULL
+      }
+      
+      
+      
+      specific_count = c()
+      specific_list = c()
+      for (b in 1:nrow(bins))
+      {
+        bin = bins$Bin[b]
+        if(!is.null(specific_count_field))
+        {
+          if(bin == 'missing')
+          {
+            specific_count = c(specific_count,length(na.omit(unique(df[,specific_count_field][which(is.na(df[,var]))]))))
+            specific_list = c(specific_list, paste(sort(unique(df[,specific_count_field][which(is.na(df[,var]))])), collapse = ','))
+            
+          } else if (is.numeric(df[,var])) {
+            lower_bound = trimws(sub('\\[', '', setdiff(unlist(strsplit(gsub('%', '', bin), ',')), 'missing')[1])) %>% as.numeric()
+            upper_bound =   trimws(sub('\\)', '', setdiff(unlist(strsplit(gsub('%', '', bin), ',')), 'missing')[2])) %>% as.numeric()
+            c = length(na.omit(unique(df[,specific_count_field][which(df[,var] >= lower_bound & df[,var] < upper_bound)])))
+            l = sort(unique(df[,specific_count_field][which(df[,var] >= lower_bound & df[,var] < upper_bound)]))
+            if('missing' %in% unlist(strsplit(gsub('%', '', bin), ',')))
+            {
+              c = c + length(na.omit(unique(df[,specific_count_field][which(is.na(df[,var]))])))
+              l = sort(unique(c(l, sort(unique(df[,specific_count_field][which(is.na(df[,var]))])))))
+            }
+            specific_count = c(specific_count,c)
+            specific_list = c(specific_list, paste(l, collapse = ","))
+            
+          } else { #categorical
+            unique_vals = unlist(strsplit(gsub('%', '', bin), ','))
+            c = length(na.omit(unique(df[,specific_count_field][which(df[,var] %in% unique_vals)])))
+            l = paste(sort(unique(df[,specific_count_field][which(df[,var] %in% unique_vals)])), collapse = ",")
+            if('missing' %in% unique_vals)
+            {
+              c = c + length(na.omit(unique(df[,specific_count_field][which(is.na(df[,var]))])))
+              l = sort(unique(c(l, sort(unique(df[,specific_count_field][which(is.na(df[,var]))])))))
+            }
+            specific_count = c(specific_count,c)
+            specific_list = c(specific_list, paste(l, collapse = ","))
+            
+          }
+        } else {
+          specific_count = c(specific_count, NA)
+          specific_list = c(specific_list, NA)
+        }
+        
+      }
+      bins = bins %>% mutate(specific_count = specific_count,
+                             specific_list = specific_list)
+      
+      all_bins = rbind(all_bins, bins)
+      all_ivs = rbind(all_ivs, ivs)
+    }
+    
+  }
+  
+  
+  
+  all_ivs = all_ivs %>% mutate(Predictive_Power = case_when(
+    Total_IV < 0.02 ~ 'None',
+    Total_IV <= 0.1 ~ 'Low',
+    Total_IV <= 0.3 ~ 'Medium',
+    Total_IV <= 0.5 ~ 'High',
+    .default = 'Suspicious'
+  ))
+  
+  all_bins = all_bins %>% mutate(Predictive_Power = case_when(
+    Total_IV < 0.02 ~ 'None',
+    Total_IV <= 0.1 ~ 'Low',
+    Total_IV <= 0.3 ~ 'Medium',
+    Total_IV <= 0.5 ~ 'High',
+    .default = 'Suspicious'
+  ))
+  
+  return(list(all_ivs,all_bins))
+}
+
+get_specific_iv_table = function(df, iv_table, bin_table, predictive_power_choice, column_categories, bin_iv_limit)
+{
+  
+  if(predictive_power_choice != 'Significant')
+  {
+    iv_predictive_power = iv_table %>%
+      filter(Predictive_Power == predictive_power_choice) %>%
+      select(Variable, Response, display) %>% arrange(Variable, Response)
+  } else {
+    iv_predictive_power = iv_table %>%
+      filter(Predictive_Power != 'None') %>%
+      select(Variable, Response, display) %>% arrange(Variable, Response)
+  }
+  
+  bins_cleaned = rbind()
+  
+  for(i in unique(iv_predictive_power$Variable))
+  {
+    if(predictive_power_choice != 'Significant')
+    {
+      subtable = bin_table %>% filter(Variable == i & Predictive_Power == predictive_power_choice) 
+    } else {
+      subtable = bin_table %>% filter(Variable == i)
+    }
+    if(all(!is.na(subtable$specific_count)))
+    {
+      if(i %in% column_categories$player_bio_data)
+      {
+        reference_number = length(unique(df$player_id))
+      }
+      if (i %in% column_categories$stadium_info)
+      {
+        reference_number = length(unique(df$Stadium))
+      }
+      subtable = subtable %>% filter(specific_count >= reference_number*0.1 & Bin_IV >= bin_iv_limit)
+    } else {
+      subtable = subtable %>% filter(Bin_IV >= bin_iv_limit)
+    }
+    bins_cleaned = rbind(bins_cleaned, subtable)
+  }
+  return(bins_cleaned)
+}
+
+
+this_or_that_results = function(ivs, this_or_that, responses)
+{
+  this_or_that[,paste0('decision_',responses)] = NA
+  
+  for(t in 1:nrow(this_or_that))
+  {
+    option1 = this_or_that$option1[t]
+    option2 = this_or_that$option2[t]
+    for(r in sort(unique(responses)))
+    {
+      filtered_table = ivs %>%
+        filter(Variable %in% c(option1, option2) & Response == r)
+      if(nrow(filtered_table) > 0)
+      {
+        this_or_that[t, paste0('decision_',r)]  = filtered_table %>%  arrange(desc(Total_IV)) %>%
+          select(Variable) %>% 
+          slice(1) %>%
+          pull()
+      }
+    }
+  }
+  
+  return(this_or_that)
+}
+
+#Turn IV results into dummy variables:
+
+iv_to_dummy = function(df, bins, response_vars, this_or_that_table)
+{
+  new_dfs = list()
+  for (r in response_vars)
+  {
+    cat('Response Variable:', r)
+    information_vars_used = bins %>% filter(Response == r) %>% filter(display == 1) %>% select(Variable) %>% distinct() %>% pull()
+    information_vars_used = setdiff(information_vars_used, c(this_or_that_table$option1, this_or_that_table$option2))
+    information_vars_used = c(information_vars_used, this_or_that_table[,paste0('decision_',r)])
+    #for the ones that did not score high on IV, I'll keep those in the model as is just in case the model sees a pattern in conjunction with other variables. But for the ones that did score high on IV, I will use the optimal bins.
+    
+    df_this_r = df %>% select(-na.omit(information_vars_used))
+    for(v in information_vars_used)
+    {
+      cat('Variable:', v)
+      relevant_bins = bins %>% filter(Response == r & Variable == v)
+      for (b in relevant_bins$Bin)
+      {
+        indices_to_include = c()
+        if(b == 'missing')
+        {
+          indices_to_include = c(indices_to_include, which(is.na(df[,v])))
+          new_var_name = paste0(v,'_missing')
+          
+        } else if (is.numeric(df[,v])) {
+          lower_bound = trimws(sub('\\[', '', setdiff(unlist(strsplit(gsub('%', '', b), ',')), 'missing')[1])) %>% as.numeric()
+          upper_bound =   trimws(sub('\\)', '', setdiff(unlist(strsplit(gsub('%', '', b), ',')), 'missing')[2])) %>% as.numeric()
+          indices_to_include = c(indices_to_include, which(df[,v] >= lower_bound & df[,v] < upper_bound))
+          if(!is.na(lower_bound) && lower_bound == (-Inf))
+          {
+            new_var_name = paste0(v,'_below_',upper_bound)
+          } else if (!is.na(upper_bound) && upper_bound == Inf)
+          {
+            new_var_name = paste0(v,'_',lower_bound,'_and_above')
+          } else if (!is.na(lower_bound) && !is.na(upper_bound)){
+            new_var_name = paste0(v,'_',lower_bound,'_',upper_bound)
+          } else {
+            new_var_name = paste0(v,'_',na.omit(c(lower_bound,upper_bound)))
+          }
+          if('missing' %in% unlist(strsplit(gsub('%', '', b), ',')))
+          {
+            indices_to_include = c(indices_to_include, which(is.na(df[,v])))
+            new_var_name = paste0(new_var_name,'_missing')
+          }
+          
+          
+        } else { #categorical
+          unique_vals = unlist(strsplit(gsub('%', '', b), ','))
+          indices_to_include = c(indices_to_include, which(df[,v] %in% unique_vals))
+          new_var_name = paste0(v,'_',paste(unique_vals, collapse='_'))
+          if('missing' %in% unique_vals)
+          {
+            indices_to_include = c(indices_to_include, which(is.na(df[,v])))
+          }
+          
+        }
+        
+        df_this_r[,new_var_name] = 0
+        df_this_r[indices_to_include, new_var_name] = 1
+        
+        cat('New var added:', new_var_name)
+        
+      }
+      
+    }
+    this_or_that_not_used = setdiff(c(this_or_that_table$option1, this_or_that_table$option2), this_or_that_table[,paste0('decision_',r)])
+    print(r)
+    df_this_r = df_this_r %>% select(-any_of(c(this_or_that_not_used, setdiff(response_vars, r))))
+    new_dfs = append(new_dfs, list(df_this_r))
+  }
+  names(new_dfs) = response_vars
+  return(new_dfs)
+}
+
+data_prep = function(df, response, pre_model = FALSE)
+{
+  if ("weight" %in% colnames(df))
+  {
+    df = df %>% rename('player_weight' = 'weight')
+  }
+  if (pre_model == TRUE)
+  {
+    df = df[, sapply(df, function(x) length(unique(x)) > 1 && !is.list(x))]
+    df[[response]] = as.numeric(as.character(df[,response]))
+  }
+  
+  df = df %>%
+    mutate(across(where(is.character), as.factor))
+  
+  df = df %>%
+    mutate(across(everything(), ~ ifelse(is.nan(.x), NA, .x))) %>%
+    rename_with(.cols = matches(" "),
+                .fn = ~gsub(' ', '_', .x)) %>%
+    select(all_of(names(.)[nchar(names(.)) <= 100]))
+  
+  
+  colnames(df) = gsub("[^A-Za-z0-9_]", "_", colnames(df))
+  
+  df = df[, !duplicated(colnames(df))] #remove any duplicated column names
+  
+  other_responses = setdiff(colnames(df)[str_detect(colnames(df), '_Yds_[0-9]+')], response)
+  df = df %>% select(-any_of(other_responses))
+  
+  return(df)
+}
+
+run_gbm = function(df, model_name, response, path, t_per_s, i_range, s_range, n_range, b_range)
+{
+  df = data_prep(df, response, pre_model = TRUE)
+  
+  #random subset if too big:
+  if(nrow(df)*ncol(df) > 15000000)
+  {
+    df = df[sample(1:nrow(df), 15000000/ncol(df)),]
+    s_range = s_range[s_range <= 0.05] #no large shrinkage if data is huge
+  }
+
+  models = list()
+  tuning=rbind()
+  for (i in i_range)
+  {
+    print(i)
+    for (s in s_range)
+    {
+      print(s)
+      t = t_per_s[which(s_range == s)]
+      for (n in n_range)
+      {
+        print(n)
+        for (bag in b_range)
+        {
+          print(bag)
+
+          formula = as.formula(paste(response, "~ ."))
+          
+          train_indices = sample(1:nrow(df), 0.8*nrow(df))
+          train = df[train_indices,]
+          valid = df[-train_indices,]
+          if(mean(train[,response]) < 0.15)
+          {
+            weights = ifelse(train[[response]] == 1, 4, 1)  # Increase weights when low prevalence
+          } else {
+            weights = NULL
+          }
+          
+          if(!is.null(weights))
+          {
+            model = gbm(formula = formula,
+                        data = train,
+                        distribution = 'bernoulli',
+                        n.trees = t,
+                        interaction.depth = i,
+                        shrinkage = s,
+                        n.minobsinnode = n,
+                        cv.folds = 5,
+                        bag.fraction = bag,
+                        weights = weights)
+          } else {
+            model = gbm(formula = formula,
+                        data = train,
+                        distribution = 'bernoulli',
+                        n.trees = t,
+                        interaction.depth = i,
+                        shrinkage = s,
+                        n.minobsinnode = n,
+                        cv.folds = 5,
+                        bag.fraction = bag)
+          }
+          print('model done')
+          best_tree = gbm.perf(model, method = "cv", plot.it = FALSE)
+        
+          res = get_prediction_data_metrics(df = valid, model = model, tree = best_tree, response = response)
+          buckets = res[[1]]
+          precision = res[[2]]
+          recall = res[[3]]          
+          
+          eval_buckets_res = evaluate_buckets(buckets)
+          avg_buckets_error = eval_buckets_res[1]
+          median_buckets_error = eval_buckets_res[2]
+          min_buckets_error = eval_buckets_res[3]
+          max_buckets_error = eval_buckets_res[4]
+          
+          print('adding to tuning:')
+          models = append(models, list(model))
+          tuning = rbind(tuning, cbind(Response = response, trees = best_tree, idepth = i, shrink = s, nmino = n, bag = bag, precision, recall, avg_buckets_error, prevalence = mean(df[,response])))
+          }
+      }
+    }
+  }
+  tuning = data.frame(tuning)
+  missing_avg_error_indices = which(is.na(tuning$avg_buckets_error))
+  if(length(missing_avg_error_indices) > 0)
+  {
+    nonmissing_tuning = tuning[-missing_avg_error_indices,]
+    models = models[-missing_avg_error_indices]
+  } else {
+    nonmissing_tuning = tuning
+  }
+  optimal_tuning_index = which.min(nonmissing_tuning$avg_buckets_error)
+  optimal_model = models[optimal_tuning_index][[1]]
+  #write the original tuning to rds, and the best model:
+  saveRDS(tuning, tolower(paste0('model/tunings_and_models/',model_name,'/',path,'/all_tunings_',response,'.rds')))
+  saveRDS(optimal_model, tolower(paste0('model/tunings_and_models/',model_name,'/',path,'/model_',response,'.rds')))
+
+}
+
+
+get_prediction_data_metrics = function(df, model, tree = NULL, response)
+{
+    #df would be a test dataset or validation dataset
+  
+    df = data_prep(df, response)
+    if(!is.null(tree))
+    {
+      tree = tree
+    } else {
+      tree = gbm.perf(model, method = "cv", plot.it = FALSE)
+    }
+    
+    preds = predict(model, df, n.trees = tree, type = "response")
+    
+    actual = df[[response]]
+    #precision and recall
+    pred_class_table = data.frame()
+    for (p in seq(0.05,1,0.05))
+    {
+      pred_classes = ifelse(preds > p, 1, 0)
+      precision = (sum(pred_classes == 1 & actual == 1))/(sum(pred_classes == 1))
+      recall = (sum(pred_classes == 1 & actual == 1))/(sum(actual == 1))
+      if(!is.na(precision) & precision > 0 & !is.na(recall) & recall > 0)
+      {
+        pred_class_table = rbind(pred_class_table, c(p, precision, recall))
+      }
+    }
+    colnames(pred_class_table) = c('p', 'precision', 'recall')
+    
+    pred_class_table$diff_p_r = abs(pred_class_table$precision - pred_class_table$recall)
+    optimal = pred_class_table[which.min(pred_class_table$diff_p_r), c('p','precision','recall')]
+    
+    buckets = ifelse(preds < 0.01, 0, 
+                     ifelse(preds < 0.1, 0.01, floor(preds*10)/10))
+    
+    #weird floating point precision so have to round the seq to 1 digit to make sure it's stored correctly:
+    pct_yes = paste0(100*round(sapply(round(c(0, 0.01, seq(0.1,0.9,0.1)),1), function(b) mean(actual[which(buckets == b)], na.rm = TRUE)),2),'%')
+    size = sapply(round(c(0, 0.01, seq(0.1,0.9,0.1)),1), function(b) sum(buckets == b))
+    
+    buckets_df = data.frame(pct_yes, size)
+    
+    
+    vec = c(0.01,seq(0.1, 0.9,0.1))
+    vec_above = c(seq(0.1,0.9,0.1), 0.99)
+    rownames(buckets_df) = c('Predicted_Less_1Pct', paste0('Predicted_',vec, '_to_',vec_above))
+    
+    return(list(buckets_df, optimal$precision, optimal$recall))
+
+  
+}
+
+evaluate_buckets = function(buckets)
+{
+  errors = c()
+  #weird floating point precision so have to round the seq to 1 digit to make sure it's stored correctly:
+  for (b in 1:length(round(c(0, 0.01, seq(0.1,0.9,0.1)),1)))
+  {
+    lower_bound = round(c(0, 0.01, seq(0.1,0.9,0.1)),1)[b]
+    upper_bound = lower_bound + 0.1
+    pct_yes = (buckets %>% mutate(pct_yes = as.numeric(gsub('%','',pct_yes))/100))[b,'pct_yes']
+    size = buckets$size[b]
+    if(size >= 10)
+    {
+      err = ifelse(pct_yes < lower_bound, (lower_bound - pct_yes),
+                   ifelse(pct_yes > upper_bound, (pct_yes - upper_bound), 0))
+    } else {
+      lower_bound_size = round(lower_bound*size)
+      upper_bound_size = round(upper_bound*size)
+      amt_yes = pct_yes*size
+      err = ifelse(size == 0, NA,
+                   ifelse(amt_yes < lower_bound_size & lower_bound_size != 0, (lower_bound_size - amt_yes) / lower_bound_size,
+                          ifelse(amt_yes > upper_bound_size & upper_bound_size !=0, (amt_yes - upper_bound_size) / upper_bound_size, 0)))
+    }
+    errors = c(errors, err)
+  }
+  avg_buckets_error = mean(errors, na.rm = TRUE)
+  median_buckets_error = median(errors, na.rm = TRUE)
+  min_buckets_error = min(errors, na.rm = TRUE)
+  max_buckets_error = max(errors, na.rm = TRUE)
+  confidence = case_when(
+    is.na(errors) ~ 'No Data',
+    errors == 0 ~ 'High',
+    errors < 0.1~ 'Medium',
+    .default = 'Low'
+  )
+  
+  return(list(avg_buckets_error, median_buckets_error, min_buckets_error, max_buckets_error, confidence))
+}
+ 
