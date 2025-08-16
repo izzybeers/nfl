@@ -16,22 +16,28 @@ knitr::opts_chunk$set(echo = TRUE)
 
 player_gamelogs = readRDS('saved_data_files/player_gamelogs.rds')
 
-basic_cols = c('player_id', 'Name', 'Position', 'Month', 'Gtm', 'Week', 'day_of_week', 'Date', 'Team', 'Game_Location', 'Opp', 'Result', 'Season')
-in_season_calculation_columns = colnames(player_gamelogs)[which(str_detect(colnames(player_gamelogs), 'Cumulative_|Avg_|Last3_|Median_|Max_|Min_|_Per_|SD_|Lag|This_Season|Pct'))]
-columns_to_use = setdiff(colnames(player_gamelogs), c(basic_cols, in_season_calculation_columns))
 
-player_gamelogs_active_weeks = player_gamelogs %>% filter(Active == 1) %>%
-  group_by(player_id, Name, Season, Team) %>%
-   summarise(
-    num_weeks = length(unique(Week)),
-     Weeks_Active = paste(sort(unique(Week)), collapse = ",") #in case he switched teams mid-season
-   ) %>% mutate(
-      Weeks_Active = ifelse(num_weeks == ifelse(Season <= 2020, 16, 17), 'All', Weeks_Active)
-   ) %>% select(-num_weeks)
+
+
+
+
+source('global.R')
+basic_cols = c('player_id', 'Name', 'Position', 'Month', 'Gtm', 'Week', 'day_of_week', 'Date', 'Team', 'Game_Location', 'Opp', 'Result', 'Season')
+in_season_calculation_columns = colnames(player_gamelogs)[str_detect(tolower(colnames(player_gamelogs)),'sum|cumulative|avg|median|max|min|sd|per|pct|lag')]
+columns_to_use = setdiff(colnames(player_gamelogs), c(basic_cols, in_season_calculation_columns, 'Playoffs'))
+
+
+uninformative_stats_results = remove_uninformative_stats(df = player_gamelogs,
+                                                         column_list = columns_to_use)
+columns_to_remove = uninformative_stats_results[[1]]
+player_gamelogs = player_gamelogs %>% conditionally_remove(columns_to_remove)
+
+columns_0_1 = uninformative_stats_results[[2]]
+low_medians = uninformative_stats_results[[3]]
     
 t1 = Sys.time()
-grouped_table = player_gamelogs %>% select(player_id, Name, Season, Team, Week, all_of(columns_to_use)) %>%
-  group_by(player_id, Name, Season, Team) %>%
+grouped_table = player_gamelogs %>% select(player_id, Name, Season, Week, all_of(columns_to_use)) %>%
+  group_by(player_id, Name, Season) %>%
    summarise(
      across(
     all_of(columns_to_use),
@@ -47,7 +53,35 @@ grouped_table = player_gamelogs %>% select(player_id, Name, Season, Team, Week, 
   ), .groups = "drop") 
 Sys.time() - t1
 
-grouped_table = grouped_table %>% left_join(player_gamelogs_active_weeks, join_by('player_id', 'Name', 'Season', 'Team')) %>% select(player_id, Name, Season, Team, Weeks_Active, everything())
+t1 = Sys.time()
+grouped_table_with_team = player_gamelogs %>% select(player_id, Name, Team, Season, Week, all_of(columns_to_use)) %>%
+  group_by(player_id, Team, Name, Season) %>%
+   summarise(
+     across(
+    all_of(columns_to_use),
+    .fns = list(
+      sum = ~sum(.x, na.rm = TRUE),
+      mean = ~mean(.x, na.rm = TRUE),
+      median = ~median(.x, na.rm = TRUE),
+      max = ~max(.x, na.rm = TRUE),
+      min = ~min(.x, na.rm = TRUE),
+      sd = ~sd(.x, na.rm = TRUE)
+    ),
+    .names = "{.col}_{.fn}"
+  ), .groups = "drop") 
+Sys.time() - t1
+
+#to be used in the get_target_rankings workflow, since some of the stats there are done by team, and the Weeks_active field is important:
+player_gamelogs_active_weeks = player_gamelogs %>% filter(Active == 1) %>%
+  group_by(player_id, Name, Season, Team) %>%
+   summarise(
+    num_weeks = length(unique(Week)),
+     Weeks_Active = paste(sort(unique(Week)), collapse = ",") #in case he switched teams mid-season
+   ) %>% mutate(
+      Weeks_Active = ifelse(num_weeks == ifelse(Season <= 2020, 16, 17), 'All', Weeks_Active)
+   ) %>% select(-num_weeks)
+
+grouped_table_with_team = grouped_table_with_team %>% left_join(player_gamelogs_active_weeks, join_by('player_id', 'Team', 'Name', 'Season')) %>% select(player_id, Name, Team, Season, Weeks_Active, everything())
 
 
 ```
@@ -60,13 +94,7 @@ grouped_table = grouped_table %>% left_join(player_gamelogs_active_weeks, join_b
 #3. Any columns that are all NA or only have one unique value will be removed.
 
 #use the column names from player gamelogs since the above summary table comes from this anyway.
-source('global.R')
-uninformative_stats_results = remove_uninformative_stats(df = player_gamelogs,
-                                                         column_list = columns_to_use)
 
-
-columns_0_1 = uninformative_stats_results[[2]]
-low_medians = uninformative_stats_results[[3]]
 
 player_seasonal_stats = grouped_table
 
@@ -106,8 +134,12 @@ player_seasonal_stats = player_seasonal_stats %>%
          Pct_Offensive_Snaps = `Snap Counts_OffSnp_sum` / Total_Team_Off_Snaps_sum,
          Pct_ST_Snaps = `Snap Counts_STSnp_sum` / Total_Team_ST_Snaps_sum)
 
+
 # player_seasonal_stats = player_seasonal_stats %>% conditionally_remove(colnames(player_seasonal_stats)[str_detect(colnames(player_seasonal_stats), '_sum')])
 
 saveRDS(player_seasonal_stats, 'saved_data_files/player_end_of_season_summary_stats.rds')
+
+#to be used in the get_target_rankings workflow, since some of the stats there are done by team, and the Weeks_active field is important:
+saveRDS(grouped_table_with_team, 'saved_data_files/player_end_of_season_summary_stats_with_team.rds')
 
 ```

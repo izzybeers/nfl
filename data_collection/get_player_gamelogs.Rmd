@@ -6,7 +6,7 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
 ```
 
 ```{r}
@@ -166,6 +166,7 @@ gamelogs_df = gamelogs_df %>%
   group_modify(~ compute_slider_cumulatives(.x, basic_cols)) %>%
   ungroup()
 
+
 print(Sys.time() - t1)
 
 ```
@@ -176,10 +177,6 @@ print(Sys.time() - t1)
 #1. For stats that are 0/1 (like Active, Game Started), a median, sd, max, and min don't make sense. For these, we will just keep the cumulative amount and the mean.
 #2. For stats with very low medians, like number of touchdowns (which are mostly 0 or 1, and in very few cases at least 2), no reason to have min or median. Only cumulative, mean, max and maybe sd are useful.
 #3. Any columns that are all NA or only have one unique value will be removed.
-
-
-
-
 
 
 if(length(columns_0_1) > 0)
@@ -228,8 +225,8 @@ summary_function = function(df, c, all_pos)
   position_rates = c()
   for (p in all_pos)
   {
-    total_position_active =  sum(str_detect(df$Position, p) & df$Active == 1 & df$Gtm > 1)
-    nonmissing_position = sum(str_detect(df_subset$Position, p) & df_subset$Active == 1 & df_subset$Gtm > 1)
+    total_position_active =  sum(str_detect(df$Position, p) & df$Active == 1 & df$Week > 1)
+    nonmissing_position = sum(str_detect(df_subset$Position, p) & df_subset$Active == 1 & df_subsetWeek > 1)
     position_rates = c(position_rates, nonmissing_position/total_position_active)
   }
   

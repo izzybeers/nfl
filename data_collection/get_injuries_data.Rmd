@@ -94,6 +94,14 @@ for(i in 2020:2024)
   injuries_data = rbind(injuries_data, readRDS(paste0('backup/injuries_report_',i,'.rds')))
 }
 
+#occasionally, a fraction of a % of the time, a player is listed on the injury list for 2 teams. Roll up by player and just take max.
+#Game Status is character so max would just be alphabetical max, but since this is so infrequent, the logic is sufficient.
+#The purpose is to avoid dupes when joining back to main table.
+injuries_data = injuries_data %>% group_by(Season, Week, Player) %>%
+  summarise(Less_Practice = max(Less_Practice),
+            Game_Status = max(Game_Status),
+            On_Injury_List = max(On_Injury_List))
+
 ```
 
 ```{r}
