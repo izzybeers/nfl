@@ -39,8 +39,8 @@ join_all_tables = function(player_bios, player_gamelogs, player_seasonal_stats,
                 select(-Name, -Season),
               join_by('player_id' == 'player_id', 'Season' == 'Year_To_Match')) %>%
     left_join(team_gamelogs %>%
-                select(Season, Team, Opp, Week, Date, Month, Day, Time_of_Day, Game_Location, Playoffs, Short_Week, Long_Week, matches('(Win)|(Differential)|(Offense)')) %>%
-                select(Season, Team, Opp, Week, Date, Month, Day, Time_of_Day, Game_Location, Playoffs, Short_Week, Long_Week,  matches('Cumulative|Pct|Avg|Min|Max|Median|SD|Last3')) %>%
+                select(Season, Team, Opp, Week, Date, Month, Day, Time, Time_of_Day, Game_Location, Playoffs, Short_Week, Long_Week, matches('(Win)|(Differential)|(Offense)')) %>%
+                select(Season, Team, Opp, Week, Date, Month, Day, Time, Time_of_Day, Game_Location, Playoffs, Short_Week, Long_Week,  matches('Cumulative|Pct|Avg|Min|Max|Median|SD|Last3')) %>%
               rename_with(
                   .cols = matches('Offense|Win|Differential|Short|Long'),
                   .fn = ~paste0('Team_',.x)),

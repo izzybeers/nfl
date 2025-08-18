@@ -14,6 +14,7 @@ Sys.setenv(CHROMOTE_CHROME = "/Users/izzybeers/chrome-headless-shell/mac-136.0.7
 
 team_lookup_table = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vT9_LcNO2d8L5kzbJQZZti9kxfAZRFRAl2oJz5WlpusfvL1txbkc8OU6BSlB54TA9HCBHRlIxi9MpuT/pub?gid=0&single=true&output=csv')
 
+#any changes to here also need to be made in app.r since published apps can't access this file:
 passing_numbers = seq(150,360,30)
 rushing_numbers = c(25,seq(40,160,20))
 receiving_numbers = c(25,seq(40,160,20))
@@ -819,9 +820,9 @@ get_forecasted_weather = function(timestamp, lat, long, api_key)
     visibility = results$hourly[[index]]$visibility
     wind_speed = results$hourly[[index]]$wind_speed
   } else {
-    temp = NA
-    visibility = NA
-    wind_speed = NA
+    temp = NA %>% as.numeric()
+    visibility = NA %>% as.numeric()
+    wind_speed = NA %>% as.numeric()
   }
   return(list(approx_temperature = temp,
               approx_visibility = visibility,
