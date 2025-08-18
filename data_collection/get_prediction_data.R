@@ -17,6 +17,11 @@ source('data_collection/scripts/join_all_tables.R')
 source('model/scripts/model_prep_script.R')
 source('data_collection/scripts/global.R')
 
+qb1_starting = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vT9_LcNO2d8L5kzbJQZZti9kxfAZRFRAl2oJz5WlpusfvL1txbkc8OU6BSlB54TA9HCBHRlIxi9MpuT/pub?gid=2014202336&single=true&output=csv') %>%
+  filter(Season == this_season) %>% select(Team, !!sym(paste0('Week', this_week)))
+colnames(qb1_starting) = c('Team', 'qb1_start')
+
+
 gs4_auth(cache = ".secrets", email = "izzyb961@gmail.com")
 
 team_abbreviations = team_lookup_table %>% select(Team, FullName, TV_abbr)
@@ -47,8 +52,8 @@ player_bios = readRDS('data_collection/saved_data_files/player_bios.rds') #this 
 new_week_player_gamelogs = get_player_gamelogs(year_cutoff = this_season, max_year_cutoff = this_season, player_bios = player_bios, basic_cols = basic_cols, missing_threshold = missing_cutoff,
                                                gamelog_html_table_tag, gamelog_html_playoff_table_tag, gamelog_advanced_html_rushing_table_tag, gamelog_advanced_html_passing_table_tag, gamelog_advanced_playoffs_html_passing_table_tag, gamelog_advanced_playoffs_html_rushing_table_tag,
                                                wk = this_week, response_only = FALSE, predict_mode = TRUE)
-# previous_gamelogs = readRDS('data_collection/saved_data_files/player_gamelogs.rds') %>% filter(!(Season == this_season & Week >= this_week))
-# player_gamelogs = bind_rows(previous_gamelogs, new_week_player_gamelogs)
+previous_gamelogs = readRDS('data_collection/saved_data_files/player_gamelogs.rds') %>% filter(!(Season == this_season & Week >= this_week))
+player_gamelogs = bind_rows(previous_gamelogs, new_week_player_gamelogs)
 # saveRDS(player_gamelogs, 'data_collection/saved_data_files/player_gamelogs.rds')
 
 #we can use the existing table, season-end stats won't be calculated in the middle of the week:
@@ -66,7 +71,7 @@ team_seasonal_stats = readRDS('data_collection/saved_data_files/team_end_of_seas
 #try with just one gamelog vs all gamelogs:
 #remember to fix the manual qb starting thing:
 player_rankings_this_week = get_players_target_rankings(min_year = this_season, max_year = this_season, player_gamelogs = player_gamelogs, player_seasonal = grouped_table_with_team,
-                                                        team_gamelogs = team_gamelogs_this_week, qb1_by_year = qb1_by_year, wk = this_week, predict_mode = TRUE)
+                                                        team_gamelogs = team_gamelogs_this_week, qb1_by_year = qb1_by_year, wk = this_week, predict_mode = TRUE, manual_qb_starters = qb1_starting)
 # , manual_qb_starters = manual_qb_starters)
 # player_rankings = saveRDS(player_rankings, 'saved_data_files/player_rankings_within_team.rds')
 previous_player_rankings = readRDS('data_collection/saved_data_files/player_rankings_within_team.rds')
@@ -100,7 +105,7 @@ injuries_data_this_week = get_injuries_data(min_year = this_season, max_year = t
 # injuries_data = bind_rows(partial_injuries_data, injuries_data_this_week)
 # saveRDS(injuries_data, 'data_collection/saved_data_files/injuries_data.rds')
 
-join_res_new = join_all_tables(player_bios, new_week_player_gamelogs, player_seasonal_stats,
+join_res = join_all_tables(player_bios, new_week_player_gamelogs, player_seasonal_stats,
                            team_gamelogs = team_gamelogs_this_week, team_seasonal_stats,
                            new_player_rankings,
                            weather_and_stadium_data_this_week,
@@ -138,6 +143,7 @@ results_by_bet_type = function(data, response_vector, model_name, model_type, ra
   all_results = rbind()
   for(response in response_vector)
   {
+    print(response)
     load_model = readRDS(paste0('model/tunings_and_models/', model_name, '/',type,'/model_', tolower(response),'.rds'))
     tree = gbm.perf(load_model, method = "cv", plot.it = FALSE)
     df = data[[response]]
@@ -189,12 +195,12 @@ all_results_rushing = results_by_bet_type(data = new_rushing_data,
                                           model_type = 'super_reduced',
                                           raw_data = join_res[[2]])
 all_results_receiving = results_by_bet_type(data = new_receiving_data,
-                                          response_vector = receiving_response, #taken from global.R
+                                          response_vector = receiving_response[1:(length(receiving_response)-1)], #taken from global.R
                                           model_name = 'receiving',
                                           model_type = 'super_reduced',
                                           raw_data = join_res[[3]])
 all_results_touchdown = results_by_bet_type(data = new_touchdown_data,
-                                            response_vector = receiving_response, #taken from global.R
+                                            response_vector = touchdown_response, #taken from global.R
                                             model_name = 'touchdown',
                                             model_type = 'super_reduced',
                                             raw_data = join_res[[4]])
@@ -263,10 +269,10 @@ dim(the_real_week_10_td)
 
 #steps:
 #make sure functions are working and run without error
-#turn the response var thing into a function and apply that everywhere
-#connect to draftkings for all prop bets
+#turn the response var thing into a function and apply that everywhere√
+#connect to draftkings for all prop bets√
 #get the qb starter thing under control
 #build front end
-#connect the probability results to a csv
+#connect the probability results to a csv√
 #make the top20 unique to the model
-#why does df_prepped have the wrong player_id?
+#why does df_prepped have the wrong player_id
