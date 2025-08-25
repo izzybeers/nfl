@@ -16,8 +16,8 @@ team_lookup_table = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vT
 
 #any changes to here also need to be made in app.r since published apps can't access this file:
 passing_numbers = seq(150,360,30)
-rushing_numbers = c(25,seq(40,160,20))
-receiving_numbers = c(25,seq(40,160,20))
+rushing_numbers = c(25,seq(40,140,20))
+receiving_numbers = c(25,seq(40,140,20))
 
 passing_response = c()
 for(n in passing_numbers)

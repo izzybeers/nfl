@@ -54,12 +54,18 @@ run_one_model = function(response, model_name, column_categories, data_file_path
 }
 
 
-tune_passing_models = function(t_per_s, i_range, s_range, n_range, b_range, path)
+tune_passing_models = function(t_per_s, i_range, s_range, n_range, b_range, path, override_response_var = NULL)
 {
   
   t1 = Sys.time()
+  if(!is.null(override_response_var))
+  {
+    responses = override_response_var
+  } else {
+    responses = passing_response
+  }
   # Run models in parallel
-  future_map(.x = passing_response, 
+  future_map(.x = responses, 
              .f = run_one_model,
              model_name = 'passing',
              column_categories = passing_data_column_categories,
@@ -76,10 +82,16 @@ tune_passing_models = function(t_per_s, i_range, s_range, n_range, b_range, path
   Sys.time() - t1
 }
 
-tune_rushing_models = function(t_per_s, i_range, s_range, n_range, b_range, path) {
+tune_rushing_models = function(t_per_s, i_range, s_range, n_range, b_range, path, override_response_var = NULL) {
   
   t1 = Sys.time()
-  future_map(.x = rushing_response, 
+  if(!is.null(override_response_var))
+  {
+    responses = override_response_var
+  } else {
+    responses = rushing_response
+  }
+  future_map(.x = responses, 
              .f = run_one_model,
              model_name = 'rushing',
              column_categories = rushing_data_column_categories,
@@ -96,10 +108,15 @@ tune_rushing_models = function(t_per_s, i_range, s_range, n_range, b_range, path
   Sys.time() - t1
 }
 
-tune_receiving_models = function(t_per_s, i_range, s_range, n_range, b_range, path) {
+tune_receiving_models = function(t_per_s, i_range, s_range, n_range, b_range, path, override_response_var = NULL) {
   t1 = Sys.time()
-  
-  future_map(.x = receiving_response, 
+  if(!is.null(override_response_var))
+  {
+    responses = override_response_var
+  } else {
+    responses = receiving_response
+  }
+  future_map(.x = responses, 
              .f = run_one_model,
              model_name = 'receiving',
              column_categories = receiving_data_column_categories,
