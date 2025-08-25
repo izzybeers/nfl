@@ -2,6 +2,7 @@ setwd("~/nfl")
 source('model/scripts/model_prep_script.R')
 source('model/scripts/run_models.R')
 source('model/scripts/model_results.R')
+source('data_collection/scripts/global.R')
 
 passing_pre_prep = readRDS('model/data/passing_preliminary_data.rds')
 rushing_pre_prep = readRDS('model/data/rushing_preliminary_data.rds')
@@ -68,38 +69,38 @@ type = 'super_reduced'
 model_manual_remove = c('min_year', 'max_year')
 
 tune_passing_models(
-  t_per_s = 150,
-  i_range = 2,
-  s_range = 0.05,
+  t_per_s = c(750, 150),
+  i_range = c(2,5,8),
+  s_range = c(0.01,0.05),
   n_range = 10,
-  b_range = 0.5,
+  b_range = c(0.3, 0.5, 0.7),
   path = type
 )
 
 tune_rushing_models(
-  t_per_s = 150,
-  i_range = 2,
-  s_range = 0.05,
+  t_per_s = c(750, 150),
+  i_range = c(2,5,8),
+  s_range = c(0.01,0.05),
   n_range = 10,
-  b_range = 0.5,
+  b_range = c(0.3, 0.5, 0.7),
   path = type
 )
 
 tune_receiving_models(
-  t_per_s = 150,
-  i_range = 2,
-  s_range = 0.05,
+  t_per_s = c(750, 150),
+  i_range = c(2,5,8),
+  s_range = c(0.01,0.05),
   n_range = 10,
-  b_range = 0.5,   
+  b_range = c(0.3, 0.5, 0.7),  
   path = type
 )
 
 tune_touchdown_model(
-  t_per_s = 150,
-  i_range = 2,
-  s_range = 0.05,
+  t_per_s = c(750, 150),
+  i_range = c(2,5,8),
+  s_range = c(0.01,0.05),
   n_range = 10,
-  b_range = 0.5,   
+  b_range = c(0.3, 0.5, 0.7),    
   path = type
 )
 
