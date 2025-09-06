@@ -311,7 +311,7 @@ get_player_gamelogs = function(player_bios, year_cutoff, max_year_cutoff, basic_
     gamelogs[,other_columns] = NA
     gamelogs_df = gamelogs
   } else { #response only -- just grabbing the response variable
-    gamelogs_df  = gamelogs_df %>% filter(Week == wk) %>% select(player_id, Season, Week, any_of(c(Passing_Yds, Rushing_Yds, Receiving_Yds, Total_Touchdowns)))
+    gamelogs_df  = gamelogs_df %>% filter(Week == wk) %>% select(player_id, Season, Week, any_of(c(Passing_Yds, Rushing_Yds, Receiving_Yds, Total_Nonpass_Touchdowns)))
   }
   
   # saveRDS(gamelogs_df, 'saved_data_files/player_gamelogs.rds')
