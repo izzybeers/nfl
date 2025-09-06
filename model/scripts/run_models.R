@@ -9,13 +9,13 @@ source('model/scripts/nfl_model_functions.R')
 source('data_collection/scripts/global.R')
 
 
-
+model_manual_remove = c('min_year', 'max_year')
 
 
 
 
 # Set up parallel plan (you can change multisession to multicore depending on OS)
-plan(multisession, workers = 4)  # Use 5 cores; adjust to what your system can handle
+plan(multisession, workers = 4)  # Use 4 cores; adjust to what your system can handle
 
 # Define a function that runs the model for one response
 run_one_model = function(response, model_name, column_categories, data_file_path, manual_remove, response_col_to_remove, path, t_per_s, i_range, s_range, n_range, b_range, df = NULL) {
@@ -23,7 +23,7 @@ run_one_model = function(response, model_name, column_categories, data_file_path
   if(is.null(df))
   {
     df = readRDS(data_file_path)[[response]] %>%
-      select(-any_of(c(column_categories$basic_cols, model_manual_remove,  response_col_to_remove)))
+      select(-any_of(c(setdiff(column_categories$basic_cols, 'GS'), model_manual_remove,  response_col_to_remove)))
     if(path== 'reduced')
     {
       string = readLines(paste0('unimportant_vars/', response, "_unimportant_vars_string.txt"))
