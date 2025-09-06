@@ -123,6 +123,7 @@ join_all_tables = function(player_bios, player_gamelogs, player_seasonal_stats,
                 select(-TV_team),
               join_by('Season' == 'Season', 'Week' == 'Week', 'Team' == 'Team')) %>%
     left_join(injuries_data, join_by('names' == 'Player', 'Week' == 'Week', 'Season' == 'Season')) %>%
+    filter(!is.na(Date)) %>% #completed games come up as NA date
     mutate(On_Injury_List = ifelse(is.na(On_Injury_List), 0, On_Injury_List),
            Less_Practice = ifelse(is.na(Less_Practice), 0, Less_Practice),
            Injury_Out = ifelse(Game_Status == 'Out', 1, 0),
@@ -253,7 +254,7 @@ join_all_tables = function(player_bios, player_gamelogs, player_seasonal_stats,
   
   stats_regex = 'passing|receiving|rushing|fumbles|snap|accuracy|pressure|tackles|sfty|yds|yards|touchdown|kick'
   historical_regex  = '(sum_)|(pct_)|(avg_)|(median_)|(sd_)|(max_)|(min_)|(cumulative_)|(seasons_ago)|(last_season)|(last3)|(lag)[0-9]|(_sum)|(_avg)|(_pct)|(_median)|(_sd)|(_max)|(_min)|(_cumulative)'
-  additional_manual_removal = c('Sk', 'Active', 'GS', 'links')
+  additional_manual_removal = c('Sk', 'Active', 'links')
   
   passing_data = remove_present_stats(df = passing_data,
                                       stats_regex = stats_regex,
@@ -299,7 +300,7 @@ join_all_tables = function(player_bios, player_gamelogs, player_seasonal_stats,
   
   
   #universal columns for all models:
-  basic_cols = c('player_id', 'names', 'positions', 'Gtm', 'Week', 'Team', 'Opp', 'Season', 'Date', 'Time')
+  basic_cols = c('player_id', 'names', 'positions', 'Gtm', 'Week', 'Team', 'Opp', 'Season', 'Date', 'Time', 'GS')
   player_bio_data = c('min_year', 'max_year', 'height', 'weight', 'college', 'Years_Since_Drafted', 'draft_round', 'draft_pick', 'original_draft_team', 'age')
   game_info = c('Month', 'Day', 'Home', 'Home_Stadium', 'Time_of_Day', 'Playoffs', 'International', 'Same_Conference', 'Same_Division', 'game_on_birthday', 'Team_Long_Week', 'Team_Short_Week', 'Opp_Long_Week', 'Opp_Short_Week', 'Long_Travel')
   misc_team_opp_info = c('Team_Last_Season_Won_Superbowl', 'Team_Two_Seasons_Ago_Won_Superbowl', 'Opp_Last_Season_Won_Superbowl', 'Opp_Two_Seasons_Ago_Won_Superbowl')
