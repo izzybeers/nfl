@@ -75,7 +75,10 @@ model_prep = function(passing_data, rushing_data, receiving_data, touchdown_data
     for(n in passing_numbers)
     {
       passing_data_train = passing_data_train %>% mutate(!!paste0('Passing_Yds_', n) := ifelse(Passing_Yds > n, 1, 0))
-      passing_data_test = passing_data_test %>% mutate(!!paste0('Passing_Yds_', n) := ifelse(Passing_Yds > n, 1, 0))
+      if(train_test_split == TRUE)
+      {
+        passing_data_test = passing_data_test %>% mutate(!!paste0('Passing_Yds_', n) := ifelse(Passing_Yds > n, 1, 0))
+      }
     }
   }
 
@@ -84,7 +87,10 @@ model_prep = function(passing_data, rushing_data, receiving_data, touchdown_data
     for(n in rushing_numbers)
     {
       rushing_data_train = rushing_data_train %>% mutate(!!paste0('Rushing_Yds_', n) := ifelse(Rushing_Yds > n, 1, 0))
-      rushing_data_test = rushing_data_test %>% mutate(!!paste0('Rushing_Yds_', n) := ifelse(Rushing_Yds > n, 1, 0))
+      if(train_test_split == TRUE)
+      {
+        rushing_data_test = rushing_data_test %>% mutate(!!paste0('Rushing_Yds_', n) := ifelse(Rushing_Yds > n, 1, 0))
+      }
     }
   }
   
@@ -93,14 +99,20 @@ model_prep = function(passing_data, rushing_data, receiving_data, touchdown_data
     for(n in receiving_numbers)
     {
       receiving_data_train = receiving_data_train %>% mutate(!!paste0('Receiving_Yds_', n) := ifelse(Receiving_Yds > n, 1, 0))
-      receiving_data_test = receiving_data_test %>% mutate(!!paste0('Receiving_Yds_', n) := ifelse(Receiving_Yds > n, 1, 0))
+      if(train_test_split == TRUE)
+      {
+        receiving_data_test = receiving_data_test %>% mutate(!!paste0('Receiving_Yds_', n) := ifelse(Receiving_Yds > n, 1, 0))
+      }
     }
   }
     
   if(nrow(touchdown_data) > 0 & train_mode == TRUE)
   {
     touchdown_data_train = touchdown_data_train %>% mutate(!!touchdown_response := ifelse(Total_Touchdowns > 0, 1, 0)) %>% select(-Total_Touchdowns)
-    touchdown_data_test = touchdown_data_test %>% mutate(!!touchdown_response := ifelse(Total_Touchdowns > 0, 1, 0)) %>% select(-Total_Touchdowns)
+    if(train_test_split == TRUE)
+    {
+      touchdown_data_test = touchdown_data_test %>% mutate(!!touchdown_response := ifelse(Total_Touchdowns > 0, 1, 0)) %>% select(-Total_Touchdowns)
+    }
   }
   
     #define which fields will be used for information value:
