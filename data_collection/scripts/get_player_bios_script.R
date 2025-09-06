@@ -5,7 +5,7 @@ source('data_collection/scripts/global.R')
 
 
 ##First, pull the master list of players and extract their basic info like name, position, and active years
-get_player_bios = function(year_cutoff, max_year_cutoff)
+get_player_bios = function(year_cutoff, max_year_cutoff, draft = FALSE, draft_year = year(Sys.Date()))
 {
   get_players_by_letter = function(let)
   {
@@ -40,6 +40,19 @@ get_player_bios = function(year_cutoff, max_year_cutoff)
   }
   
   player_df = bind_rows(map(.x = LETTERS, .f = get_players_by_letter))
+  
+  if(draft == TRUE)
+  {
+    draft_player_list = get_html_content(url = paste0('https://www.pro-football-reference.com/years/',draft_year,'/draft.htm'))
+    names = draft_player_list %>% html_nodes('td[data-stat="player"] a') %>% html_text(trim = TRUE)
+    positions = draft_player_list %>% html_nodes('td[data-stat="pos"]') %>% html_text(trim = TRUE)
+    links = draft_player_list %>% html_nodes('td[data-stat="player"] a') %>% html_attr("href")
+    player_id =  gsub('.htm|/[A-Z]/', '', links %>% str_extract('/[A-Z]/.*\\.htm'))
+    min_year = draft_year
+    max_year = year(Sys.Date())
+    draft_df = data.frame(player_id, names, positions, min_year = min_year, max_year = max_year, links = links) %>% filter(!(player_id %in% player_df$player_id))
+  }
+  player_df = bind_rows(player_df, draft_df)
 
   players_with_positions = player_df %>% filter(positions != '')
   
