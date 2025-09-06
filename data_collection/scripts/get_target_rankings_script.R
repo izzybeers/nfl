@@ -21,7 +21,7 @@ get_players_target_rankings = function(min_year, max_year, player_gamelogs, play
       group_by(Season, Week, Team) %>% summarise(Qb1_starting = max(Qb1_starting)) %>%
       arrange(Season, Team, Week)
   } else {
-    qb_starters = df %>% filter(Week == wk) %>% left_join(manual_qb_starters, join_by(Team == Team))  %>% select(Season, Week, Team, player_id, Name, qb1_start)
+    qb_starters = manual_qb_starters %>% mutate(Season = max_year, Week = wk) %>% select(Season, Week, Team, Qb1_starting)
   }
   
   if(!is.null(wk) & predict_mode == FALSE)
