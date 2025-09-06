@@ -1,5 +1,6 @@
 library(dplyr)
 library(googlesheets4)
+library(gbm3)
 
 #this is run at the end of each week to add to the main dataset so the model can be rerun, and take the prediction df from last week and add to training data.
 #First, we get the results from last week (the response variable: passing yds, rushing yds, receiving yds, and touchdowns)
@@ -17,9 +18,14 @@ source('data_collection/scripts/join_all_tables.R')
 source('model/scripts/model_prep_script.R')
 source('data_collection/scripts/global.R')
 
+this_season = 2025
+this_week = 1
+data_collection_min_year = this_season - 2 #need 2 years of historical data for feature engineering
+
+
 qb1_starting = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vT9_LcNO2d8L5kzbJQZZti9kxfAZRFRAl2oJz5WlpusfvL1txbkc8OU6BSlB54TA9HCBHRlIxi9MpuT/pub?gid=2014202336&single=true&output=csv') %>%
   filter(Season == this_season) %>% select(Team, !!sym(paste0('Week', this_week)))
-colnames(qb1_starting) = c('Team', 'qb1_start')
+colnames(qb1_starting) = c('Team', 'Qb1_starting')
 
 
 gs4_auth(cache = ".secrets", email = "izzyb961@gmail.com")
@@ -37,12 +43,6 @@ gamelog_advanced_html_passing_table_tag = 'passing_advanced'
 gamelog_advanced_playoffs_html_passing_table_tag = 'passing_advanced_post'
 gamelog_advanced_playoffs_html_rushing_table_tag = 'adv_rushing_and_receiving_post'
 
-this_season = 2025
-this_week = 1
-data_collection_min_year = this_season - 2 #need 2 years of historical data for feature engineering
-
-
-
 
 #collect upcoming data for this week:
 player_bios = readRDS('data_collection/saved_data_files/player_bios.rds') #this likely won't change mid-season, so we can use the existing one
@@ -52,6 +52,34 @@ player_bios = readRDS('data_collection/saved_data_files/player_bios.rds') #this 
 new_week_player_gamelogs = get_player_gamelogs(year_cutoff = this_season, max_year_cutoff = this_season, player_bios = player_bios, basic_cols = basic_cols, missing_threshold = missing_cutoff,
                                                gamelog_html_table_tag, gamelog_html_playoff_table_tag, gamelog_advanced_html_rushing_table_tag, gamelog_advanced_html_passing_table_tag, gamelog_advanced_playoffs_html_passing_table_tag, gamelog_advanced_playoffs_html_rushing_table_tag,
                                                wk = this_week, response_only = FALSE, predict_mode = TRUE)
+
+#game start:
+page = get_html_content(url = 'https://www.rotowire.com/football/lineups.php')
+games <- html_elements(page, ".lineups .lineup.is-nfl")
+starter_table = data.frame()
+positions = c('QB', 'RB', 'WR', 'WR', 'WR', 'TE', 'K')
+for (g in 1:length(games))
+{
+  this_game = games[[g]]
+  away_team = this_game %>% html_node('.lineup__team.is-visit') %>% html_text(trim = TRUE)
+  away_team = team_abbreviations$Team[team_abbreviations$TV_abbr == away_team]
+  home_team = this_game %>% html_node('.lineup__team.is-home') %>% html_text(trim = TRUE)
+  home_team = team_abbreviations$Team[team_abbreviations$TV_abbr == home_team]
+  starters_away = (this_game %>% html_nodes('.lineup__list.is-visit .lineup__player a')  %>%  html_attr("title"))[1:7]
+  starters_away = sapply(strsplit(starters_away, '   '), function(x) trimws(x[[length(x)]]))
+  # starter_positions_away = this_game %>% html_nodes('.lineup__list.is-visit .lineup__player  .lineup__pos')  %>% html_text(trim = TRUE)
+  starters_home = (this_game %>% html_nodes('.lineup__list.is-home .lineup__player a')  %>%  html_attr("title"))[1:7]
+  # starter_positions_home = this_game %>% html_nodes('.lineup__list.is-home .lineup__player  .lineup__pos')  %>% html_text(trim = TRUE)
+  this_game_table = data.frame(bind_rows(
+    data.frame(positions, team = away_team, player = starters_away),
+    data.frame(positions, team = home_team, player = starters_home)))
+  starter_table = rbind(starter_table,
+                        this_game_table)
+}
+starter_table$match = 1
+
+new_week_player_gamelogs = new_week_player_gamelogs %>% left_join(starter_table, join_by('Position' == 'positions', 'Name' == 'player', 'Team' == 'team')) %>%
+  mutate(GS = ifelse(is.na(match), 0, 1))
 previous_gamelogs = readRDS('data_collection/saved_data_files/player_gamelogs.rds') %>% filter(!(Season == this_season & Week >= this_week))
 player_gamelogs = bind_rows(previous_gamelogs, new_week_player_gamelogs)
 # saveRDS(player_gamelogs, 'data_collection/saved_data_files/player_gamelogs.rds')
@@ -105,18 +133,17 @@ injuries_data_this_week = get_injuries_data(min_year = this_season, max_year = t
 # injuries_data = bind_rows(partial_injuries_data, injuries_data_this_week)
 # saveRDS(injuries_data, 'data_collection/saved_data_files/injuries_data.rds')
 
-join_res = join_all_tables(player_bios, new_week_player_gamelogs, player_seasonal_stats,
-                           team_gamelogs = team_gamelogs_this_week, team_seasonal_stats,
-                           new_player_rankings,
-                           weather_and_stadium_data_this_week,
+join_res = join_all_tables(player_bios = player_bios,
+                           player_gamelogs = new_week_player_gamelogs,
+                           player_seasonal_stats = player_seasonal_stats,
+                           team_gamelogs = team_gamelogs_this_week, team_seasonal_stats = team_seasonal_stats,
+                           player_rankings = new_player_rankings,
+                           weather_and_stadium_data = weather_and_stadium_data_this_week,
                            playoff_clinching_data = playoff_clinching_data_this_week,
-                           injuries_data_this_week,
-                           missing_cutoff,
+                           injuries_data = injuries_data_this_week,
+                           missing_cutoff = missing_cutoff,
                            season_data_cutoff = this_season,
                            predict_mode = TRUE)
-
-
-
 
 
 passing_data_column_categories = readRDS('model/data/passing_data_column_categories.rds')
@@ -128,7 +155,7 @@ prediction_data_model_prepped  = model_prep(join_res[[1]], join_res[[2]], join_r
                                             passing_data_column_categories, rushing_data_column_categories, receiving_data_column_categories, touchdown_data_column_categories,
                                             train_test_split = FALSE, train_mode = FALSE) 
 
-
+ 
 type = 'super_reduced'
 
 new_passing_data = prediction_data_model_prepped[[1]]
@@ -136,7 +163,15 @@ new_rushing_data = prediction_data_model_prepped[[2]]
 new_receiving_data = prediction_data_model_prepped[[3]]
 new_touchdown_data = prediction_data_model_prepped[[4]]
 
+saveRDS(new_passing_data, paste0('model/prediction_results/passing/',this_season,'_wk', this_week, '_prediction_df'))
+saveRDS(new_rushing_data, paste0('model/prediction_results/rushing/',this_season,'_wk', this_week, '_prediction_df'))
+saveRDS(new_receiving_data, paste0('model/prediction_results/receiving/',this_season,'_wk', this_week, '_prediction_df'))
+saveRDS(new_touchdown_data, paste0('model/prediction_results/touchdown/',this_season,'_wk', this_week, '_prediction_df'))
 
+new_passing_data = readRDS(paste0('model/prediction_results/passing/',this_season,'_wk', this_week, '_prediction_df'))
+new_rushing_data = readRDS(paste0('model/prediction_results/rushing/',this_season,'_wk', this_week, '_prediction_df'))
+new_receiving_data = readRDS(paste0('model/prediction_results/receiving/',this_season,'_wk', this_week, '_prediction_df'))
+new_touchdown_data = readRDS(paste0('model/prediction_results/touchdown/',this_season,'_wk', this_week, '_prediction_df'))
 
 results_by_bet_type = function(data, response_vector, model_name, model_type, raw_data)
 {
@@ -151,7 +186,6 @@ results_by_bet_type = function(data, response_vector, model_name, model_type, ra
     preds = predict(load_model, df_prepped, n.trees = tree, type = "response")
     results = data.frame(this_season, this_week, response, df$player_id, preds) %>% unique()
     colnames(results) = c('Season', 'Week', 'response', 'player_id', 'probability')
-    top20_columns = head(summary(load_model, plot.it = FALSE), 20) %>% select(var) %>% pull()
     model_confidence = readRDS(paste0('model/tunings_and_models/', model_name, '/', type, '/confidence.rds'))[,response]
     
     #fix this since preds isn't the right column name:
@@ -169,6 +203,11 @@ results_by_bet_type = function(data, response_vector, model_name, model_type, ra
       TRUE ~ 'Predicted_0.9_to_0.99'
     ),
     Confidence = model_confidence[Probability_Bin]) %>% select(-Probability_Bin)
+    
+    rm(load_model)
+    rm(df)
+    rm(df_prepped)
+    gc()
     
     all_results = all_results%>%
       bind_rows(results)
@@ -195,7 +234,7 @@ all_results_rushing = results_by_bet_type(data = new_rushing_data,
                                           model_type = 'super_reduced',
                                           raw_data = join_res[[2]])
 all_results_receiving = results_by_bet_type(data = new_receiving_data,
-                                          response_vector = receiving_response[1:(length(receiving_response)-1)], #taken from global.R
+                                          response_vector = receiving_response, #taken from global.R -- TEMPORARY SINCE 160 WASNT WORKING
                                           model_name = 'receiving',
                                           model_type = 'super_reduced',
                                           raw_data = join_res[[3]])
@@ -205,10 +244,7 @@ all_results_touchdown = results_by_bet_type(data = new_touchdown_data,
                                             model_type = 'super_reduced',
                                             raw_data = join_res[[4]])
 
-saveRDS(new_passing_data, paste0('model/prediction_results/passing/',this_season,'_wk', this_week, '_prediction_df'))
-saveRDS(new_rushing_data, paste0('model/prediction_results/rushing/',this_season,'_wk', this_week, '_prediction_df'))
-saveRDS(new_receiving_data, paste0('model/prediction_results/receiving/',this_season,'_wk', this_week, '_prediction_df'))
-saveRDS(new_touchdown_data, paste0('model/prediction_results/touchdown/',this_season,'_wk', this_week, '_prediction_df'))
+
 
 
 sheet_id = '19sWOOPFI37WaR5lmlYS6UUrV-0dmTn0iTFqUp26sfGI'

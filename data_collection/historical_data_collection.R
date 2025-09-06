@@ -10,7 +10,7 @@ source('data_collection/scripts/get_injuries_data_script.R')
 source('data_collection/scripts/get_playoff_clinching_data_script.R')
 source('data_collection/scripts/join_all_tables.R')
 
-source('model/model_prep_script.R')
+source('model/scripts/model_prep_script.R')
 source('data_collection/scripts/global.R')
 team_abbreviations = team_lookup_table %>% select(Team, FullName, TV_abbr)
 model_min_year = 2022
@@ -31,9 +31,12 @@ gamelog_advanced_playoffs_html_rushing_table_tag = 'adv_rushing_and_receiving_po
 
 
 
-player_bios = get_player_bios(year_cutoff = data_collection_min_year, max_year_cutoff = max_year)
+player_bios = get_player_bios(year_cutoff = data_collection_min_year, max_year_cutoff = max_year, draft = TRUE)
+# player_bios$max_year[which(!is.na(player_bios$current_team))] = this_season
 
 saveRDS(player_bios, 'data_collection/saved_data_files/player_bios.rds')
+
+#player_bios = readRDS('data_collection/saved_data_files/player_bios.rds')
 
 
 
@@ -47,7 +50,7 @@ player_seasonal_stats = seasonal_stats[[1]]
 grouped_table_with_team = seasonal_stats[[2]]
 saveRDS(player_seasonal_stats, 'data_collection/saved_data_files/player_end_of_season_summary_stats.rds')
 saveRDS(grouped_table_with_team, 'data_collection/saved_data_files/player_end_of_season_summary_stats_with_team.rds')
-# seasonal_stats = readRDS('data_collection/saved_data_files/player_end_of_season_summary_stats.rds')
+#seasonal_stats = readRDS('data_collection/saved_data_files/player_end_of_season_summary_stats.rds')
 # grouped_table_with_team = readRDS('data_collection/saved_data_files/player_end_of_season_summary_stats_with_team.rds')
 
 team_res = get_team_gamelogs(start_year = data_collection_min_year, end_year = max_year, basic_cols = basic_cols, missing_threshold = missing_cutoff, calculate_season_end_stats = TRUE)
@@ -63,24 +66,24 @@ saveRDS(team_seasonal_stats, 'data_collection/saved_data_files/team_end_of_seaso
 player_rankings = get_players_target_rankings(min_year = model_min_year, max_year = max_year, player_gamelogs = player_gamelogs, player_seasonal = grouped_table_with_team,
                     team_gamelogs = team_gamelogs, qb1_by_year = qb1_by_year)
 player_rankings = saveRDS(player_rankings, 'data_collection/saved_data_files/player_rankings_within_team.rds')
-# player_rankings = readRDS('data_collection/saved_data_files/player_rankings_within_team.rds')
+#player_rankings = readRDS('data_collection/saved_data_files/player_rankings_within_team.rds')
 
 #fields related to weather, stadium, location, date:
 #try with just one gamelog vs all gamelogs:
 weather_and_stadium_data =  get_weather_and_stadium_data(games = team_gamelogs)
 saveRDS(weather_and_stadium_data, 'data_collection/saved_data_files/weather_and_stadium_data.rds')
-# weather_and_stadium_data = readRDS('data_collection/saved_data_files/weather_and_stadium_data.rds')
+#weather_and_stadium_data = readRDS('data_collection/saved_data_files/weather_and_stadium_data.rds')
 
 #fields related to whether team has clinched, has been eliminated, or has control over playoff fate in the next game (clinch or eliminate)
 playoff_clinching_data = get_playoff_clinching_data(min_year = model_min_year, max_year = max_year)
 saveRDS(playoff_clinching_data, 'data_collection/saved_data_files/playoff_clinching_table.rds')
-# playoff_clinching_data = readRDS('data_collection/saved_data_files/playoff_clinching_table.rds')
+#playoff_clinching_data = readRDS('data_collection/saved_data_files/playoff_clinching_table.rds')
 
 #fields related to player injury status:
 
 injuries_data = get_injuries_data(min_year = model_min_year, max_year = max_year)
 saveRDS(injuries_data, 'data_collection/saved_data_files/injuries_data.rds')
-# injuries_data = readRDS('data_collection/saved_data_files/injuries_data.rds')
+#injuries_data = readRDS('data_collection/saved_data_files/injuries_data.rds')
 
 join_res = join_all_tables(player_bios, player_gamelogs, player_seasonal_stats,
             team_gamelogs, team_seasonal_stats,
@@ -98,16 +101,16 @@ saveRDS(join_res[[4]], 'model/data/touchdown_preliminary_data.rds')
 
 
 saveRDS(join_res[[5]],
-        '../model/data/passing_data_column_categories.rds')
+        'model/data/passing_data_column_categories.rds')
 
 saveRDS(join_res[[6]],
-        '../model/data/rushing_data_column_categories.rds')
+        'model/data/rushing_data_column_categories.rds')
 
 saveRDS(join_res[[7]],
-        '../model/data/receiving_data_column_categories.rds')
+        'model/data/receiving_data_column_categories.rds')
 
 saveRDS(join_res[[8]],
-        '../model/data/touchdown_data_column_categories.rds')
+        'model/data/touchdown_data_column_categories.rds')
 
 
 

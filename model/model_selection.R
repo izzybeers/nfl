@@ -1,3 +1,4 @@
+library(stats)
 setwd("~/nfl")
 source('model/scripts/model_prep_script.R')
 source('model/scripts/run_models.R')
@@ -56,12 +57,12 @@ rm(new_touchdown_data_test)
 # new_passing_data = readRDS('model/data/model_ready_passing_train_df.rds')
 # new_rushing_data = readRDS('model/data/model_ready_rushing_train_df.rds')
 # new_receiving_data = readRDS('model/data/model_ready_receiving_train_df.rds')
-# new_touchdown_data = readRDS('model/data/model_ready_touchdown_train_df.rds')
+#new_touchdown_data = readRDS('model/data/model_ready_touchdown_train_df.rds')
 # 
 # new_passing_data_test = readRDS('model/data/model_ready_passing_test_df.rds')
 # new_rushing_data_test = readRDS('model/data/model_ready_rushing_test_df.rds')
 # new_receiving_data_test = readRDS('model/data/model_ready_receiving_test_df.rds')
-# new_touchdown_data_test = readRDS('model/data/model_ready_touchdown_test_df.rds')
+#new_touchdown_data_test = readRDS('model/data/model_ready_touchdown_test_df.rds')
 
 
 type = 'super_reduced' 
@@ -86,6 +87,7 @@ tune_rushing_models(
   path = type
 )
 
+t1 = Sys.time()
 tune_receiving_models(
   t_per_s = c(750, 150),
   i_range = c(2,5,8),
@@ -94,7 +96,9 @@ tune_receiving_models(
   b_range = c(0.3, 0.5, 0.7),  
   path = type
 )
+Sys.time() - t1
 
+t1 = Sys.time()
 tune_touchdown_model(
   t_per_s = c(750, 150),
   i_range = c(2,5,8),
@@ -103,20 +107,30 @@ tune_touchdown_model(
   b_range = c(0.3, 0.5, 0.7),    
   path = type
 )
+Sys.time() - t1
 
 
 model_names = c('passing', 'rushing', 'receiving', 'touchdown')
-response_list = list(passing_response, rushing_response,receiving_response, touchdown_response)
+response_list = list(passing_response, rushing_response, receiving_response, touchdown_response)
 
 for(i in 1:length(model_names))
 {
-  
   res = assess_model_results(test = readRDS(paste0('model/data/model_ready_',model_names[i],'_test_df.rds')), type = type, model_category = model_names[i],responses = response_list[[i]])
   confidence = t(res[[1]])
   optimals = res[[2]]
   all_tunings = res[[3]]
   abnormal_top20_vars = res[[4]]
+  confidence[,names(abnormal_top20_vars)][1:11] = 'Low'
   saveRDS(confidence, paste0('model/tunings_and_models/', model_names[i], '/', type,'/confidence.rds'))
+  gc()
 }
 
+for(i in 1:length(model_names))
+{
+  for (r in response_list[[i]])
+  {
+    mod = readRDS(paste0('model/tunings_and_models/', model_names[i],'/',type,'/','model_',tolower(r),'.rds'))
+    summary(mod)
+  }
+}
 

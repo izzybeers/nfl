@@ -12,7 +12,7 @@ assess_model_results = function(test, type, model_category, responses)
   all_confidence = data.frame()
   all_tunings = rbind()
   optimals = rbind()
-  abnormal_top_20 = rbind()
+  abnormal_top_20 = list()
   for (response in responses)
   {
     print(response)
@@ -46,7 +46,7 @@ assess_model_results = function(test, type, model_category, responses)
     top20 = head(summary(model, plot.it = FALSE), 20)
     if(top20$rel_inf[1] > 50)
     {
-      abnormal_top_20 = rbind(abnormal_top_20, top20)
+      abnormal_top_20[[response]] = top20
     }
     
     if(type == 'full')

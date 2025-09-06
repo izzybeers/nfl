@@ -12,7 +12,7 @@ library(rvest)
 options(chromote.headless = "new")
 Sys.setenv(CHROMOTE_CHROME = "/Users/izzybeers/chrome-headless-shell/mac-136.0.7103.49/chrome-headless-shell-mac-x64/chrome-headless-shell")
 
-team_lookup_table = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vT9_LcNO2d8L5kzbJQZZti9kxfAZRFRAl2oJz5WlpusfvL1txbkc8OU6BSlB54TA9HCBHRlIxi9MpuT/pub?gid=0&single=true&output=csv')
+team_lookup_table = read.csv('https://docs.google.com/spreadsheets/d/1DSSz4X-3LLAarRlBRtuMsGJ1hh2FDdVeHJZFdpZGW0A/export?format=csv&gid=0')
 
 #any changes to here also need to be made in app.r since published apps can't access this file:
 passing_numbers = seq(150,360,30)
@@ -172,6 +172,7 @@ get_player_bio = function(player_row)
     year_drafted = NA
     birthday = NA
     original_draft_team = NA
+    current_team = NA
   }
   return(data.frame(name, current_team, birthday, height, weight, college, year_drafted, draft_round, draft_pick, original_draft_team))
 }
@@ -263,7 +264,7 @@ prepare_gamelog_table = function(df, df_advanced_p = NULL, df_advanced_rr = NULL
       }
       
       combined_df[combined_df == 'Inactive' | combined_df == 'Did Not Play' | combined_df == 'COVID-19 List'] = NA
-      touchdown_colnames = colnames(combined_df)[str_detect(colnames(combined_df), 'TD')]
+      touchdown_colnames = setdiff(colnames(combined_df)[str_detect(colnames(combined_df), 'TD')], c('Passing_TD', 'Fumbles_FRTD', 'Fumbles_TD'))
       if (nrow(combined_df) > 1)
       {
         combined_df[,which(!(colnames(combined_df) %in% c('Date', 'Team', 'Game_Location', 'Opp', 'Result', 'GS')))] = sapply(combined_df[,which(!(colnames(combined_df) %in% c('Date', 'Team', 'Game_Location', 'Opp', 'Result', 'GS')))], as.numeric)
@@ -679,11 +680,11 @@ get_team_game_logs = function(url, y)
                                           paste(colnames(team_gamelog_table), team_gamelog_table[1,], sep = '_'),
                                           team_gamelog_table[1,])
     team_gamelog_table = team_gamelog_table[2:nrow(team_gamelog_table),]
-    if(!(any(team_gamelog_table[,5] == 'boxscore'))) 
+    if(!(any(str_detect(team_gamelog_table[,5] %>% as.character(), 'preview|boxscore')))) 
     {
       colnames(team_gamelog_table)[which(colnames(team_gamelog_table) %in% c('', 'NA'))] = c('Time', 'Game_Location', 'Result')
       team_gamelog_table = team_gamelog_table %>% mutate(Week = as.numeric(Week)) %>% filter(!is.na(Week)) #remove weeks ike Pre, Pre 2, Regular Season, etc
-      team_gamelog_table = team_gamelog_table %>% mutate(Win = ifelse(Result == 'preview', NA, ifelse(unlist(sapply(strsplit(Result, ','), function(x) x[1])) == 'W', 1, 0)),
+      team_gamelog_table = team_gamelog_table %>% mutate(Win = ifelse(Result == 'preview', NA, ifelse(unlist(sapply(strsplit(Result, ','), function(x) x[1])) == 'W', 1, 0) %>% as.numeric()),
                                                          Scores = ifelse(Result == 'preview', NA, unlist(sapply(strsplit(Result, ','), function(x) x[2]))) %>% trimws(),
                                                          Score1 = ifelse(is.na(Win), NA, unlist(sapply(strsplit(Scores, '-'), function(x) x[1]))),
                                                          Score2 = ifelse(is.na(Win), NA, unlist(sapply(strsplit(Scores, '-'), function(x) x[2]))),
@@ -697,9 +698,9 @@ get_team_game_logs = function(url, y)
     } else {
       colnames(team_gamelog_table)[which(colnames(team_gamelog_table) %in% c('', 'NA'))] = c('Time', 'Boxscore', 'Result', 'Game_Location')
       team_gamelog_table = team_gamelog_table %>% mutate(
-        Win = ifelse(is.na(Result), NA, ifelse(Result == 'W', 1, 0)),
+        Win = ifelse(is.na(Result), NA, ifelse(Result == 'W', 1, 0)) %>% as.numeric(),
         OT = ifelse(OT == 'OT', 1, 0),
-        Differential = as.numeric(Score_Tm) - as.numeric(Score_Opp),)
+        Differential = as.numeric(Score_Tm) - as.numeric(Score_Opp))
     }
   
     team_gamelog_table = team_gamelog_table %>% filter(Opp != 'Bye Week' & Opp != '') %>%

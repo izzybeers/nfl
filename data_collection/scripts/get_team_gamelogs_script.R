@@ -85,7 +85,7 @@ get_team_gamelogs = function(start_year, end_year, basic_cols, missing_threshold
              Defense_PassY = NA %>% as.numeric(),
              Defense_RushY = NA %>% as.numeric(),
              Defense_TO = NA %>% as.numeric(),
-             Defense_1stD = NA %>% as.numeric(),)
+             Defense_1stD = NA %>% as.numeric())
   }
   
   team_gamelog_table = team_gamelog_table %>%
@@ -225,7 +225,7 @@ get_team_gamelogs = function(start_year, end_year, basic_cols, missing_threshold
                                  select(Year, Date, Designatedvisitor, `Designatedhome team`) %>%
                                  mutate(Year = as.numeric(Year))) %>%
     bind_rows() %>%
-    filter(Year >= start_year) %>%
+    filter(Year >= start_year & Year <= end_year) %>%
     mutate(Hometeam = gsub('\\[[0-9]+\\]', '', `Designatedhome team`),
            Awayteam = gsub('\\[[0-9]+\\]', '', `Designatedvisitor`)) %>%
     left_join(team_lookup_table %>% select(FullName, Team) %>% rename('Awayteam_abbr' = 'Team'), join_by('Awayteam' == 'FullName')) %>%
