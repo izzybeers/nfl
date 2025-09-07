@@ -140,26 +140,27 @@ get_team_gamelogs = function(start_year, end_year, basic_cols, missing_threshold
     
 
   
- 
-  
-  if(length(columns_0_1) > 0)
-  {
-    team_gamelog_table = team_gamelog_table %>% select(-any_of(colnames(team_gamelog_table)[which(colnames(team_gamelog_table) %in% paste0('SD_', columns_0_1))]))
-    team_gamelog_table = team_gamelog_table %>% select(-any_of(colnames(team_gamelog_table)[which(colnames(team_gamelog_table) %in% paste0('Last3_SD_', columns_0_1))]))
-    team_gamelog_table = team_gamelog_table %>% select(-any_of(colnames(team_gamelog_table)[which(colnames(team_gamelog_table) %in% paste0('Median_', columns_0_1))]))
-    team_gamelog_table = team_gamelog_table %>% select(-any_of(colnames(team_gamelog_table)[which(colnames(team_gamelog_table) %in% paste0('Last3_Median_', columns_0_1))]))
-    team_gamelog_table = team_gamelog_table %>% select(-any_of(colnames(team_gamelog_table)[which(colnames(team_gamelog_table) %in% paste0('Max_', columns_0_1))]))
-    team_gamelog_table = team_gamelog_table %>% select(-any_of(colnames(team_gamelog_table)[which(colnames(team_gamelog_table) %in% paste0('Last3_Max_', columns_0_1))]))
-    team_gamelog_table = team_gamelog_table %>% select(-any_of(colnames(team_gamelog_table)[which(colnames(team_gamelog_table) %in% paste0('Min_', columns_0_1))]))
-    team_gamelog_table = team_gamelog_table %>% select(-any_of(colnames(team_gamelog_table)[which(colnames(team_gamelog_table) %in% paste0('Last3_Min_', columns_0_1))]))
-  }
-  if(length(low_medians) > 0)
-  {
-    team_gamelog_table = team_gamelog_table %>% select(-any_of(colnames(team_gamelog_table)[which(colnames(team_gamelog_table) %in% paste0('Median_', low_medians))]))
-    team_gamelog_table = team_gamelog_table %>% select(-any_of(colnames(team_gamelog_table)[which(colnames(team_gamelog_table) %in% paste0('Last3_Median_', low_medians))]))
-    team_gamelog_table = team_gamelog_table %>% select(-any_of(colnames(team_gamelog_table)[which(colnames(team_gamelog_table) %in% paste0('Max_', columns_0_1))]))
-    team_gamelog_table = team_gamelog_table %>% select(-any_of(colnames(team_gamelog_table)[which(colnames(team_gamelog_table) %in% paste0('Last3_Max_', columns_0_1))]))
-  }
+ if(predict_mode == FALSE)
+ {
+    if(length(columns_0_1) > 0)
+    {
+      team_gamelog_table = team_gamelog_table %>% select(-any_of(colnames(team_gamelog_table)[which(colnames(team_gamelog_table) %in% paste0('SD_', columns_0_1))]))
+      team_gamelog_table = team_gamelog_table %>% select(-any_of(colnames(team_gamelog_table)[which(colnames(team_gamelog_table) %in% paste0('Last3_SD_', columns_0_1))]))
+      team_gamelog_table = team_gamelog_table %>% select(-any_of(colnames(team_gamelog_table)[which(colnames(team_gamelog_table) %in% paste0('Median_', columns_0_1))]))
+      team_gamelog_table = team_gamelog_table %>% select(-any_of(colnames(team_gamelog_table)[which(colnames(team_gamelog_table) %in% paste0('Last3_Median_', columns_0_1))]))
+      team_gamelog_table = team_gamelog_table %>% select(-any_of(colnames(team_gamelog_table)[which(colnames(team_gamelog_table) %in% paste0('Max_', columns_0_1))]))
+      team_gamelog_table = team_gamelog_table %>% select(-any_of(colnames(team_gamelog_table)[which(colnames(team_gamelog_table) %in% paste0('Last3_Max_', columns_0_1))]))
+      team_gamelog_table = team_gamelog_table %>% select(-any_of(colnames(team_gamelog_table)[which(colnames(team_gamelog_table) %in% paste0('Min_', columns_0_1))]))
+      team_gamelog_table = team_gamelog_table %>% select(-any_of(colnames(team_gamelog_table)[which(colnames(team_gamelog_table) %in% paste0('Last3_Min_', columns_0_1))]))
+    }
+    if(length(low_medians) > 0)
+    {
+      team_gamelog_table = team_gamelog_table %>% select(-any_of(colnames(team_gamelog_table)[which(colnames(team_gamelog_table) %in% paste0('Median_', low_medians))]))
+      team_gamelog_table = team_gamelog_table %>% select(-any_of(colnames(team_gamelog_table)[which(colnames(team_gamelog_table) %in% paste0('Last3_Median_', low_medians))]))
+      team_gamelog_table = team_gamelog_table %>% select(-any_of(colnames(team_gamelog_table)[which(colnames(team_gamelog_table) %in% paste0('Max_', columns_0_1))]))
+      team_gamelog_table = team_gamelog_table %>% select(-any_of(colnames(team_gamelog_table)[which(colnames(team_gamelog_table) %in% paste0('Last3_Max_', columns_0_1))]))
+    }
+ }
   
   team_gamelog_table = team_gamelog_table %>%
     rename('Pct_Win' = 'Avg_Win') %>%
@@ -235,7 +236,7 @@ get_team_gamelogs = function(start_year, end_year, basic_cols, missing_threshold
   team_gamelog_table = team_gamelog_table %>%
     left_join(international_games, join_by('Season' == 'Year', 'Date' == 'Date', 'Team' == 'Awayteam_abbr')) %>%
     left_join(international_games, join_by('Season' == 'Year', 'Date' == 'Date', 'Team' == 'Hometeam_abbr')) %>%
-    mutate(International = ifelse(!is.na(Awayteam_abbr) | !is.na(Hometeam_abbr), 1, 0),
+   mutate(International = ifelse(!is.na(Awayteam_abbr) | !is.na(Hometeam_abbr), 1, 0),
            Home_Stadium = ifelse(Game_Location == 'Home' & International == 0, 1, 0)) %>% select(-Awayteam_abbr, -Hometeam_abbr)
   
   return(list(team_gamelog_table, team_gamelog_table_season_end))
