@@ -212,8 +212,9 @@ results_by_bet_type = function(data, response_vector, model_name, model_type, ra
     all_results = all_results%>%
       bind_rows(results)
   }
-  return(all_results %>% left_join(raw_data %>% select('player_id', 'names', 'Day', 'Date', 'Time', 'Time_of_Day', 'Team', 'Opp', 'positions', 'Home'),
+  return(all_results %>% left_join(raw_data %>% select('player_id', 'names', 'Day', 'Date', 'Time', 'Time_of_Day', 'Team', 'Opp', 'positions', 'Home', 'GS'),
                                    join_by(player_id)) %>% 
+           rename('Starting' = 'GS') %>%
            mutate(update_time = format(
              force_tz(Sys.time(), "America/New_York"),
              "%Y-%m-%d %I:%M %p"

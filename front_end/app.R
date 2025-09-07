@@ -132,7 +132,7 @@ join_preds_and_props = function(preds, props)
            Timeslot = paste(Day, Time_of_Day)) %>%
     rename('Player' = 'names') %>%
     filter(as.POSIXct(paste0(Date, ", ", Season, " ", Time),format = "%B %d, %Y %I:%M %p",tz = "America/New_York") > Sys.time()) %>% 
-    select(Player, Position, Type, label, Team, Opp, Timeslot, Odds, Model_Probability, Betting_Line_Implied_Prob, Expected_Accuracy, profit_per_100)
+    select(Player, Position, Starting, Type, label, Team, Opp, Timeslot, Odds, Model_Probability, Betting_Line_Implied_Prob, Expected_Accuracy, profit_per_100)
   return(joined)
 }
 
