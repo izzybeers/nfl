@@ -117,7 +117,7 @@ model_prep = function(passing_data, rushing_data, receiving_data, touchdown_data
   
     #define which fields will be used for information value:
     
-    if(train_mode == TRUE)
+    if(train_mode == TRUE & train_test_split == TRUE)
     {
       passing_information_value_vars = setdiff(unlist(passing_data_column_categories[names(passing_data_column_categories)[!str_detect(tolower(names(passing_data_column_categories)), 'season')]]),
                                                c('player_id', 'Gtm','Season', 'Date', 'min_year', 'max_year', 'Time', manual_remove))
@@ -222,7 +222,7 @@ model_prep = function(passing_data, rushing_data, receiving_data, touchdown_data
     saveRDS(all_bins_rushing, 'model/iv_bins/all_bins_rushing.rds')
     saveRDS(all_bins_receiving, 'model/iv_bins/all_bins_receiving.rds')
     saveRDS(all_bins_touchdown, 'model/iv_bins/all_bins_touchdown.rds')
-  } else{ #prediction mode
+  } else{ #prediction mode or just updating model with weekly results won't result in a re-run of information values
     ivs_passing = readRDS('model/iv_bins/ivs_passing.rds')
     ivs_rushing = readRDS('model/iv_bins/ivs_rushing.rds')
     ivs_receiving  = readRDS('model/iv_bins/ivs_receiving.rds')
