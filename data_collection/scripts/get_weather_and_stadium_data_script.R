@@ -39,7 +39,7 @@ get_weather_and_stadium_data = function(games, forecast = FALSE)
     nondome_games_with_weather = games %>% filter(Roof == 'Open') %>%
       select(Season, Week, Date, Time_of_Day, Stadium, weather_station_link) %>% distinct() %>%
       mutate(weather = pmap(list(Date, Time_of_Day, weather_station_link, Stadium),
-                            ~ get_weather(..1, ..2, station_link = ..3, stadium = ..4))) %>%
+                            ~ get_historical_weather (..1, ..2, station_link = ..3, stadium = ..4))) %>%
       unnest_wider(weather, names_sep = "_")
   } else {
       
@@ -54,13 +54,14 @@ get_weather_and_stadium_data = function(games, forecast = FALSE)
     ),
     posix_timestamp_game =  as.POSIXct(paste(Date, weather_forecast_time), tz = "America/New_York"))
     
+    games = games %>% filter(posix_timestamp_game > Sys.time())
+    
     nondome_games_with_weather = games %>% filter(Roof == 'Open') %>%
       select(Season, Week, Date, posix_timestamp_game, Stadium, Latitude, Longitude) %>% distinct() %>%
       mutate(weather = future_pmap(list(posix_timestamp_game, Latitude, Longitude, api_key),
                                    ~ get_forecasted_weather(timestamp = ..1, lat = ..2, long = ..3, api_key = ..4))) %>%
       unnest_wider(weather, names_sep = "_")
   }
-      
     games_with_weather = games %>%
       left_join(nondome_games_with_weather %>% select(Stadium, Week, Season, weather_approx_temperature, weather_approx_visibility, weather_approx_wind_speed), join_by('Stadium' == 'Stadium', 'Week' == 'Week', 'Season' == 'Season')) %>%
       select(-weather_station_link, -Date, -Time_of_Day, -Opp_Coast, -Opp_Conference, -Opp_Division) %>%

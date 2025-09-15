@@ -64,16 +64,10 @@ get_team_gamelogs = function(start_year, end_year, basic_cols, missing_threshold
   columns_0_1 = uninformative_stats_results[[2]]
   low_medians = uninformative_stats_results[[3]]
   
-  if(predict_mode == TRUE)
-  {
-    #only predict games that haven't started:
-    team_gamelog_table = team_gamelog_table %>% filter(as.POSIXct(paste0(Date, ", ", Season, " ", Time),format = "%B %d, %Y %I:%M %p",tz = "America/New_York") > Sys.time())
-  }
-  
   
   team_gamelog_table_before_calculations = team_gamelog_table
   
-  if(predict_mode == TRUE & wk == 1)
+  if(!is.null(wk) && predict_mode == TRUE && wk == 1)
   {
     team_gamelog_table = team_gamelog_table %>%
       mutate(Offense_TotYd = NA %>% as.numeric(),
@@ -86,6 +80,19 @@ get_team_gamelogs = function(start_year, end_year, basic_cols, missing_threshold
              Defense_RushY = NA %>% as.numeric(),
              Defense_TO = NA %>% as.numeric(),
              Defense_1stD = NA %>% as.numeric())
+  } else if (!is.null(wk) && predict_mode == TRUE) {
+    team_gamelog_table$Offense_TotYd[team_gamelog_table$Week == wk] = NA
+    team_gamelog_table$Offense_PassY[team_gamelog_table$Week == wk] = NA
+    team_gamelog_table$Offense_RushY[team_gamelog_table$Week == wk] = NA
+    team_gamelog_table$Offense_TO[team_gamelog_table$Week == wk] = NA
+    team_gamelog_table$Offense_1stD[team_gamelog_table$Week == wk] = NA
+    team_gamelog_table$Defense_TotYd[team_gamelog_table$Week == wk] = NA
+    team_gamelog_table$Defense_PassY[team_gamelog_table$Week == wk] = NA
+    team_gamelog_table$Defense_RushY[team_gamelog_table$Week == wk] = NA
+    team_gamelog_table$Defense_TO[team_gamelog_table$Week == wk] = NA
+    team_gamelog_table$Win[team_gamelog_table$Week == wk] = NA
+    team_gamelog_table$Differential[team_gamelog_table$Week == wk] = NA
+    team_gamelog_table$OT[team_gamelog_table$Week == wk] = NA
   }
   
   team_gamelog_table = team_gamelog_table %>%
@@ -166,7 +173,7 @@ get_team_gamelogs = function(start_year, end_year, basic_cols, missing_threshold
     rename('Pct_Win' = 'Avg_Win') %>%
     select(-any_of(c('Avg_Playoffs', 'Last3_Avg_Playoffs', 'Cumulative_Playoffs', 'Last3_Cumulative_Playoffs')))
   
-  if(predict_mode == TRUE & wk == 1)
+  if(!is.null(wk) && predict_mode == TRUE && wk == 1)
   {
     team_gamelog_table = team_gamelog_table %>%
       group_by(Season, Week) %>%
@@ -207,11 +214,17 @@ get_team_gamelogs = function(start_year, end_year, basic_cols, missing_threshold
   d = c(NA, diff(date_numerical))
   team_gamelog_table$Short_Week = ifelse(d < 6, 1, 0)
   team_gamelog_table$Long_Week = ifelse(d > 8, 1, 0)
-  
+  team_gamelog_table$Short_Week[which(team_gamelog_table$Week == 1)] = NA
+  team_gamelog_table$Long_Week[which(team_gamelog_table$Week == 1)] = NA
   
   if (!is.null(wk))
   {
     team_gamelog_table = team_gamelog_table %>% filter(Week == wk)
+    if(predict_mode == TRUE)
+    {
+      #only predict games that haven't started:
+      team_gamelog_table = team_gamelog_table %>% filter(as.POSIXct(paste0(Date, ", ", Season, " ", Time),format = "%B %d, %Y %I:%M %p",tz = "America/New_York") > Sys.time())
+    }
   }
   
   

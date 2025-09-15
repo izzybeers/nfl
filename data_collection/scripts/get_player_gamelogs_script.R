@@ -18,7 +18,7 @@ get_player_gamelogs = function(player_bios, year_cutoff, max_year_cutoff, basic_
   
   t1 = Sys.time()
   
-  gamelog_per_player = function(p, player_bios)
+  gamelog_per_player = function(p, player_bios, schedule = NULL)
   {
     print(p)
     player_min_year = max(year_cutoff,(player_bios$min_year[p]))
@@ -43,9 +43,20 @@ get_player_gamelogs = function(player_bios, year_cutoff, max_year_cutoff, basic_
       {
         if(predict_mode == TRUE)
         {
-          current_team = player_bios$links[p]
-          #placeholder in for the upcoming week to calculate stats on it:
-          gamelog_with_stats = bind_rows(gamelog_with_stats %>% filter(Week < wk), data.frame(Week = wk))
+          current_team = player_bios$current_team[p] #in full name form
+          current_team_abbr = team_lookup_table$Team[team_lookup_table$FullName == current_team]
+          new_gtm = gamelog_with_stats %>% filter(Week < wk) %>% select(Gtm) %>% pull() %>% max() + 1
+          upcoming_schedule = schedule %>% filter(Team == current_team_abbr)
+          upcoming_schedule = upcoming_schedule %>% mutate(player_id = player_bios$player_id[p],
+                                                           Name = player_bios$names[p],
+                                                           Season = y,
+                                                           Gtm = new_gtm,
+                                                           Position = player_bios$positions[p],
+                                                           Week = as.numeric(Week)
+                                                           )
+           
+           #placeholder in for the upcoming week to calculate stats on it:
+          gamelog_with_stats = bind_rows(gamelog_with_stats %>% filter(Week < wk), upcoming_schedule)
         }
         gamelog_with_stats[which(gamelog_with_stats$Active == 0), setdiff(colnames(gamelog_with_stats), c(basic_cols, 'Active'))] = NA
         # gamelog_with_stats = gamelog_with_stats %>% arrange(Week) %>% get_cumulative(last3 = FALSE, skip = basic_cols, team = team_cols)
@@ -73,7 +84,7 @@ get_player_gamelogs = function(player_bios, year_cutoff, max_year_cutoff, basic_
                Passing_Yds_Lag3 = lag(Passing_Yds, n = 3, order_by = Week))
         }
       } else { #gamelogs is null
-        if(predict_mode == TRUE & wk == 1)
+        if(!is.null(wk) && predict_mode == TRUE && wk == 1)
         {
           gamelog_with_stats = data.frame(player_id = player_bios$player_id[p],
                                                Season = y,
@@ -84,13 +95,13 @@ get_player_gamelogs = function(player_bios, year_cutoff, max_year_cutoff, basic_
                                                
         }
       }
-      wait = runif(1,2,4)
+      wait = runif(1,3,5)
       Sys.sleep(wait)
       gamelogs_all_years = bind_rows(gamelogs_all_years, gamelog_with_stats)
     }
     return(gamelogs_all_years)
   }
-  if(wk == 1 & predict_mode == TRUE) #first week of season predict mode treated differently because there are no previous gamelogs for this season yet
+  if(!is.null(wk) && predict_mode == TRUE && wk == 1) #first week of season predict mode treated differently because there are no previous gamelogs for this season yet
   {
     player_bios = player_bios %>% filter(max_year >= (year_cutoff - 1) & min_year <= max_year_cutoff & !is.na(current_team) & current_team %in% team_lookup_table$FullName) #consider everyone who played last year to start, who doesn't have missing current_team.
   } else { 
@@ -98,13 +109,20 @@ get_player_gamelogs = function(player_bios, year_cutoff, max_year_cutoff, basic_
   }
   player_bios = player_bios %>% filter(!is.na(current_team) & current_team %in% team_lookup_table$FullName) #must be on an active team
   
-  gamelogs = map(1:nrow(player_bios), gamelog_per_player, player_bios)
+  if(predict_mode == TRUE)
+  {
+    upcoming_schedule = get_season_schedule(season = year_cutoff, wk = wk)
+    wait = runif(1,3,5)
+    Sys.sleep(wait)
+    gamelogs = map(1:nrow(player_bios), gamelog_per_player, player_bios, schedule = upcoming_schedule)
+  } else {
+    gamelogs = map(1:nrow(player_bios), gamelog_per_player, player_bios)
+  } 
 
   print('done scraping logs')
-  # gamelogs = discard(gamelogs, is.null)
   gamelogs = bind_rows(gamelogs)
 
-  if(response_only == FALSE & !(predict_mode == TRUE & wk == 1))
+  if(response_only == FALSE & !(!is.null(wk) && predict_mode == TRUE && wk == 1))
   {
     gamelogs_df = gamelogs %>% arrange(player_id, Season, Week) %>%
       select(player_id, Name, Position, Season, Gtm, Week, Team, Active, GS, everything(), -any_of(c("Opp", "Game_Location", "Month")))
@@ -243,48 +261,6 @@ get_player_gamelogs = function(player_bios, year_cutoff, max_year_cutoff, basic_
       }
     }
     
-    # gamelogs_df = gamelogs_df %>% 
-    #   mutate(This_Season_Passing_Comp_Pct = Cumulative_Passing_Cmp / Cumulative_Passing_Att,
-    #          This_Season_Receiving_Catch_Pct = Cumulative_Receiving_Rec / Cumulative_Receiving_Tgt,
-    #          This_Season_Passing_Yds_Per_Completion = Cumulative_Passing_Yds / Cumulative_Passing_Cmp,
-    #          This_Season_Passing_Yds_Per_Attempt = Cumulative_Passing_Yds / Cumulative_Passing_Att,
-    #          This_Season_Rushing_Yds_Per_Attempt = Cumulative_Rushing_Yds / Cumulative_Rushing_Att,
-    #          This_Season_Rushing_1D_Per_Attempt = Cumulative_Rushing_1D / Cumulative_Rushing_Att,
-    #          This_Season_Rushing_YAC_Per_Attempt = Cumulative_Rushing_YAC / Cumulative_Rushing_Att,
-    #          This_Season_Receiving_Yds_Per_Tgt = Cumulative_Receiving_Yds / Cumulative_Receiving_Tgt,
-    #          This_Season_Receiving_Yds_Per_Rec = Cumulative_Receiving_Yds / Cumulative_Receiving_Rec,
-    #          This_Season_Receiving_1D_Per_Tgt = Cumulative_Receiving_1D / Cumulative_Receiving_Tgt,
-    #          This_Season_Receiving_1D_Per_Rec = Cumulative_Receiving_1D / Cumulative_Receiving_Rec,
-    #          This_Season_Receiving_YBC_Per_Tgt = Cumulative_Receiving_YBC / Cumulative_Receiving_Tgt,
-    #          This_Season_Receiving_YBC_Per_Rec = Cumulative_Receiving_YBC / Cumulative_Receiving_Rec,
-    #          This_Season_Receiving_YAC_Per_Tgt = Cumulative_Receiving_YAC / Cumulative_Receiving_Tgt,
-    #          This_Season_Receiving_YAC_Per_Rec = Cumulative_Receiving_YAC / Cumulative_Receiving_Rec,
-    #          This_Season_Pct_Offensive_Snaps = `Cumulative_Snap Counts_OffSnp` / Cumulative_Total_Team_Off_Snaps,
-    #          This_Season_Pct_ST_Snaps = `Cumulative_Snap Counts_STSnp` / Cumulative_Total_Team_ST_Snaps,
-    #          Last3_Passing_Comp_Pct = Last3_Cumulative_Passing_Cmp / Last3_Cumulative_Passing_Att,
-    #          Last3_Receiving_Catch_Pct = Last3_Cumulative_Receiving_Rec / Last3_Cumulative_Receiving_Tgt,
-    #          Last3_Passing_Yds_Per_Completion = Last3_Cumulative_Passing_Yds / Last3_Cumulative_Passing_Cmp,
-    #          Last3_Passing_Yds_Per_Attempt = Last3_Cumulative_Passing_Yds / Last3_Cumulative_Passing_Att,
-    #          Last3_Rushing_Yds_Per_Attempt = Last3_Cumulative_Rushing_Yds / Last3_Cumulative_Rushing_Att,
-    #          Last3_Rushing_1D_Per_Attempt = Last3_Cumulative_Rushing_1D / Last3_Cumulative_Rushing_Att,
-    #          Last3_Rushing_YAC_Per_Attempt = Last3_Cumulative_Rushing_YAC / Last3_Cumulative_Rushing_Att,
-    #          Last3_Receiving_Yds_Per_Tgt = Last3_Cumulative_Receiving_Yds / Last3_Cumulative_Receiving_Tgt,
-    #          Last3_Receiving_Yds_Per_Rec = Last3_Cumulative_Receiving_Yds / Last3_Cumulative_Receiving_Rec,
-    #          Last3_Receiving_1D_Per_Tgt = Last3_Cumulative_Receiving_1D / Last3_Cumulative_Receiving_Tgt,
-    #          Last3_Receiving_1D_Per_Rec = Last3_Cumulative_Receiving_1D / Last3_Cumulative_Receiving_Rec,
-    #          Last3_Receiving_YBC_Per_Tgt = Last3_Cumulative_Receiving_YBC / Last3_Cumulative_Receiving_Tgt,
-    #          Last3_Receiving_YBC_Per_Rec = Last3_Cumulative_Receiving_YBC / Last3_Cumulative_Receiving_Rec,
-    #          Last3_Receiving_YAC_Per_Tgt = Last3_Cumulative_Receiving_YAC / Last3_Cumulative_Receiving_Tgt,
-    #          Last3_Receiving_YAC_Per_Rec = Last3_Cumulative_Receiving_YAC / Last3_Cumulative_Receiving_Rec,
-    #          Last3_Pct_Offensive_Snaps = `Last3_Cumulative_Snap Counts_OffSnp` / Last3_Cumulative_Total_Team_Off_Snaps,
-    #          Last3_Pct_ST_Snaps = `Last3_Cumulative_Snap Counts_STSnp` / Last3_Cumulative_Total_Team_ST_Snaps
-    #          )
-    
-    
-    
-    
-    
-    
     #duplicate removal
     
     duplicates = gamelogs_df %>% group_by(player_id, Name, Season, Week) %>% summarise(n = n()) %>% filter(n > 1)
@@ -305,13 +281,14 @@ get_player_gamelogs = function(player_bios, year_cutoff, max_year_cutoff, basic_
     {
       gamelogs_df = gamelogs_df %>% filter(Week == wk)
     }
-  } else if(predict_mode == TRUE & wk == 1) {
+  }
+  else if(predict_mode == TRUE & wk == 1) {
     existing_gamelog_table = readRDS('data_collection/saved_data_files/player_gamelogs.rds')
     other_columns = setdiff(colnames(existing_gamelog_table), colnames(gamelogs))
     gamelogs[,other_columns] = NA
     gamelogs_df = gamelogs
   } else { #response only -- just grabbing the response variable
-    gamelogs_df  = gamelogs_df %>% filter(Week == wk) %>% select(player_id, Season, Week, any_of(c(Passing_Yds, Rushing_Yds, Receiving_Yds, Total_Nonpass_Touchdowns)))
+    gamelogs_df  = gamelogs %>% filter(Week == wk) %>% select(player_id, Season, Week, any_of(c('Passing_Yds', 'Rushing_Yds', 'Receiving_Yds', 'Total_Nonpass_Touchdowns')))
   }
   
   # saveRDS(gamelogs_df, 'saved_data_files/player_gamelogs.rds')
