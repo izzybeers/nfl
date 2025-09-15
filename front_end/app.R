@@ -36,6 +36,19 @@ team_lookup_table = read.csv('https://docs.google.com/spreadsheets/d/1DSSz4X-3LL
 min_return_portfolio_optimization = 0.5
 
 correlations = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vT9_LcNO2d8L5kzbJQZZti9kxfAZRFRAl2oJz5WlpusfvL1txbkc8OU6BSlB54TA9HCBHRlIxi9MpuT/pub?gid=956130726&single=true&output=csv')
+previous_recs = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vTyIaWWovW2YUP1-JxYpg9ZHpF7a2i_7AEVan5ptaBBiwj6gwYp0STpE8HvYILR190HTrOFt2GMyUqn/pub?gid=277208139&single=true&output=csv')
+if(!is.null(previous_recs) && nrow(previous_recs) > 0)
+{
+  most_recent_save = max(as.POSIXct(previous_recs$run_time,format = "%Y-%m-%d %I:%M %p"))
+} else {
+  most_recent_save = NULL
+}
+
+extra_passing_info = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vTyIaWWovW2YUP1-JxYpg9ZHpF7a2i_7AEVan5ptaBBiwj6gwYp0STpE8HvYILR190HTrOFt2GMyUqn/pub?gid=1528317693&single=true&output=csv')
+extra_rushing_info = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vTyIaWWovW2YUP1-JxYpg9ZHpF7a2i_7AEVan5ptaBBiwj6gwYp0STpE8HvYILR190HTrOFt2GMyUqn/pub?gid=1396923583&single=true&output=csv')
+extra_receiving_info = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vTyIaWWovW2YUP1-JxYpg9ZHpF7a2i_7AEVan5ptaBBiwj6gwYp0STpE8HvYILR190HTrOFt2GMyUqn/pub?gid=942194055&single=true&output=csv')
+extra_touchdown_info = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vTyIaWWovW2YUP1-JxYpg9ZHpF7a2i_7AEVan5ptaBBiwj6gwYp0STpE8HvYILR190HTrOFt2GMyUqn/pub?gid=864263040&single=true&output=csv')
+
 
 #need this if the app.R file can't access global.R in a different directory:
 passing_numbers = seq(150,360,30)
@@ -131,9 +144,195 @@ join_preds_and_props = function(preds, props)
     mutate(Betting_Line_Implied_Prob = ifelse(as.numeric(Odds) < 0, (-1)*as.numeric(Odds) / ((-1)*as.numeric(Odds) + 100), 100 / (as.numeric(Odds) + 100)),
            Timeslot = paste(Day, Time_of_Day)) %>%
     rename('Player' = 'names') %>%
-    filter(as.POSIXct(paste0(Date, ", ", Season, " ", Time),format = "%B %d, %Y %I:%M %p",tz = "America/New_York") > Sys.time()) %>% 
+    filter(as.POSIXct(paste0(Date, ", ", Season, " ", Time),format = "%B %d, %Y %I:%M %p",tz = "America/New_York") > Sys.time()) %>%
     select(Player, Position, Starting, Type, label, Team, Opp, Timeslot, Odds, Model_Probability, Betting_Line_Implied_Prob, Expected_Accuracy, profit_per_100)
   return(joined)
+}
+
+
+display_extra_info = function(bet_type, player_name, latest_week, latest_season)
+{
+  if(bet_type == 'Passing')
+  {
+    extra_info = extra_passing_info %>% filter(Name == player_name)
+    extra_info_min_year = paste0('In NFL since: ', extra_info$min_year)
+    extra_info_draft = ifelse(!is.na(extra_info$draft_round),
+                              paste0('Drafted Round ', extra_info$draft_round, ' (Pick ', extra_info$draft_pick, ') to team ', team_lookup_table$FullName[team_lookup_table$Team == extra_info$original_draft_team]),
+                              'Undrafted, or no draft info available')
+    extra_info_home = ifelse(extra_info$International == 1, 'International Game',
+                             ifelse(extra_info$Home == 1, 'Home Game', 'Away Game'))
+    if(latest_week > 1)
+    {
+      if(!is.na(extra_info$Pct_Active) && extra_info$Pct_Active > 0)
+      {
+        extra_info_pct_active_gs = paste0('This season, Active for ', round(100*extra_info$Pct_Active),'% of games, and Starter for ', round(100*extra_info$Pct_GS), '% of games')
+        opp_defense_passyd  = round(extra_info$Opp_Avg_Defense_PassY_Allowed)
+        opp_defense_passyd_score = ifelse(opp_defense_passyd <= 130, 'Very Good Pass Defense',
+                                          ifelse(opp_defense_passyd <= 202, 'Pretty Good Pass Defense',
+                                                 ifelse(opp_defense_passyd <= 241, 'Okay Pass Defense',
+                                                        ifelse(opp_defense_passyd <= 320, 'Not Good Pass Defense',
+                                                               'Terrible Pass Defense'))))
+        extra_info_stats_this_season = paste0('Is the team\'s QB1: ', ifelse(extra_info$Is_Qb1 == 1, 'Yes', 'No'), '<br>',
+                                              'Passing Yds Previous Game: ', extra_info$Passing_Yds_Lag1, '<br>',
+                                              'This Season, Average Passing Yds Per Game: ', round(extra_info$Avg_Passing_Yds), '<br>',
+                                              'This Season, Average Passing Attempts Per Game: ', round(extra_info$Avg_Passing_Att, 1), '<br>',
+                                              'This Season, Average Passing 1st Downs Per Game: ', round(extra_info$Avg_Passing_1D, 1), '<br>',
+                                              'This Season, Average Passing Completions Per Game: ', round(extra_info$Avg_Passing_Cmp,1), '<br>',
+                                              'This Season, Average Passing TD Per Game: ', round(extra_info$Avg_Passing_TD,1), '<br>',
+                                              'This Season, Opponent\'s Average Passing Yards Allowed Per Game: ', opp_defense_passyd, ' (', opp_defense_passyd_score,')', '<br>')
+      } else {
+        extra_info_stats_this_season = 'Player had no active games this season, so no current stats to show.'
+      }
+    } else {
+      extra_info_stats_this_season = 'Since it is only week 1, there are no current season stats to show.'
+    }
+    if(extra_info$min_year < latest_season) {
+      if(!is.na(extra_info$Last_Season_Pct_Active) && extra_info$Last_Season_Pct_Active > 0)
+      {
+        extra_info_stats_last_season = paste0('Last Season, Percent of Games Active: ', round(100*extra_info$Last_Season_Pct_Active), '%<br>',
+                                              'Last Season, Median Passing Yds Per Game: ', round(extra_info$Last_Season_Passing_Yds_median), '<br>',
+                                              'Last Season, Passing Completion Percent: ', round(100*extra_info$Last_Season_Passing_Comp_Pct), '%<br>',
+                                              'Last Season, Average Passing TD Per Game: ', round(extra_info$Last_Season_Passing_TD_mean,1), '<br>')
+      } else {
+        extra_info_stats_last_season = 'Player had no active games last season, or last season stats unavailable.'
+      }
+    } else {
+      extra_info_stats_last_season = 'This is the player\'s first season in the NFL, so no previous season stats to show.'
+    }
+    
+  } else if(bet_type == 'Rushing')
+  {
+    extra_info = extra_rushing_info %>% filter(Name == player_name)
+    extra_info_min_year = paste0('In NFL since: ', extra_info$min_year)
+    extra_info_draft = ifelse(!is.na(extra_info$draft_round),
+                              paste0('Drafted Round ', extra_info$draft_round, ' (Pick ', extra_info$draft_pick, ') to team ', team_lookup_table$FullName[team_lookup_table$Team == extra_info$original_draft_team]),
+                              'Undrafted, or no draft info available')
+    extra_info_home = ifelse(extra_info$International == 1, 'International Game',
+                             ifelse(extra_info$Home == 1, 'Home Game', 'Away Game'))
+    if(latest_week > 1)
+    {
+      extra_info_pct_active_gs = paste0('This season, Active for ', round(100*extra_info$Pct_Active),'% of games, and Starter for ', round(100*extra_info$Pct_GS), '% of games')
+      opp_defense_rushyd  = round(extra_info$Opp_Avg_Defense_RushY_Allowed)
+      opp_defense_rushyd_score = ifelse(opp_defense_rushyd <= 58, 'Very Good Rush Defense',
+                                        ifelse(opp_defense_rushyd <= 99, 'Pretty Good Rush Defense',
+                                               ifelse(opp_defense_rushyd <= 124, 'Okay Rush Defense',
+                                                      ifelse(opp_defense_rushyd <= 185, 'Not Good Rush Defense',
+                                                             'Terrible Rush Defense'))))
+      if(!is.na(extra_info$Pct_Active) && extra_info$Pct_Active > 0)
+      {
+        extra_info_stats_this_season = paste0('This Season, Average Rushing Yds Per Game: ',  round(extra_info$Avg_Rushing_Yds,1),'<br>',
+                                              'This Season, Average Rushing Attempts Per Game: ', round(extra_info$Avg_Rushing_Att,1),'<br>',
+                                              'This Season, Average Rushing 1st Downs Per Game: ', round(extra_info$Avg_Rushing_1D, 1), '<br>',
+                                              'Rushing Yds Previous Game: ', extra_info$Rushing_Yds_Lag1, '<br>',
+                                              'This Season, Opponent\'s Defense Avg Rush Yards Allowed Per Game: ', opp_defense_rushyd, ' (', opp_defense_rushyd_score, ')')
+      } else {
+        extra_info_stats_this_season = 'Player had no active games this year, so there are no current season stats to show.'
+      }
+    } else {
+      extra_info_stats_this_season = 'Since it is only week 1, there are no current season stats to show.'
+    }
+    if(extra_info$min_year < latest_season) {
+      if(!is.na(extra_info$Last_Season_Pct_Active) && extra_info$Last_Season_Pct_Active > 0)
+      {
+        extra_info_stats_last_season = paste0('Last Season, Percent of Games Active: ', round(100*extra_info$Last_Season_Pct_Active), '%<br>',
+                                              'Last Season, Average Rushing Yds Per Game: ', round(extra_info$Last_Season_Rushing_Yds_mean, 1), '<br>',
+                                              'Last Season, Highest Rushing Yds in a Game: ', round(extra_info$Last_Season_Rushing_Yds_max), '<br>',
+                                              'Last Season, Average Rushing TD Per Game: ', round(extra_info$Last_Season_Rushing_TD_mean,1), '<br>',
+                                              'Last Season, Average Rushing Attempts Per Game: ', round(extra_info$Last_Season_Rushing_Att_mean,1), '<br>')
+        
+      } else {
+        extra_info_stats_last_season = 'Player had no active games last year, so no previous season stats to show.'
+      }
+    } else {
+      extra_info_stats_last_season = 'This is the player\'s first season in the NFL, so no previous season stats to show.'
+    }
+    
+  } else if(bet_type == 'Receiving')
+  {
+    extra_info = extra_receiving_info  %>% filter(Name == player_name)
+    extra_info_min_year = paste0('In NFL since: ', extra_info$min_year)
+    extra_info_draft = ifelse(!is.na(extra_info$draft_round),
+                              paste0('Drafted Round ', extra_info$draft_round, ' (Pick ', extra_info$draft_pick, ') to team ', team_lookup_table$FullName[team_lookup_table$Team == extra_info$original_draft_team]),
+                              'Undrafted, or no draft info available')
+    extra_info_home = ifelse(extra_info$International == 1, 'International Game',
+                             ifelse(extra_info$Home == 1, 'Home Game', 'Away Game'))
+    if(latest_week > 1)
+    {
+      extra_info_pct_active_gs = paste0('This season, Active for ', round(100*extra_info$Pct_Active),'% of games, and Starter for ', round(100*extra_info$Pct_GS), '% of games')
+      if(!is.na(extra_info$Pct_Active) && extra_info$Pct_Active > 0)
+      {
+        extra_info_stats_this_season = paste0('This Season, Average Receiving Yds Per Game: ',  round(extra_info$Avg_Receiving_Yds,1), '<br>',
+                                              'This Season, Average Targets Per Game: ',  round(extra_info$Avg_Receiving_Tgt,1), '<br>',
+                                              'This Season, Average Receiving 1st Downs Per Game: ', round(extra_info$Avg_Receiving_1D, 1), '<br>',
+                                              'This Season, Average Receptions Per Game: ', round(extra_info$Avg_Receiving_Rec,1))
+      } else {
+        extra_info_stats_this_season = 'Player had no active games this year, so there are no current season stats to show.'
+      }
+    } else {
+      extra_info_stats_this_season = 'Since it is only week 1, there are no current season stats to show.'
+    }
+    if(extra_info$min_year < latest_season) {
+      if(!is.na(extra_info$Last_Season_Pct_Active) && extra_info$Last_Season_Pct_Active > 0)
+      {
+        extra_info_stats_last_season = paste0('Last Season, Percent of Games Active: ', round(100*extra_info$Last_Season_Pct_Active), '%<br>',
+                                              'Last Season, Average Receiving Yds Per Game: ', round(extra_info$Last_Season_Receiving_Yds_mean, 1), '<br>',
+                                              'Last Season, Average Targets Per Game: ', round(extra_info$Last_Season_Receiving_Tgt_mean, 1), '<br>',
+                                              'Last Season, Average Receiving 1st Downs Per Game: ', round(extra_info$Last_Season_Receiving_1D_mean, 2), '%<br>',
+                                              'Last Season, Average Receiving Yards Before Catch Per Game: ', round(extra_info$Last_Season_Receiving_YBC_mean,1), '<br>',
+                                              'Last Season, Highest Receiving Yards Before Catch Per Game: ', round(extra_info$Last_Season_Receiving_YBC_max), '<br>')
+        
+      } else {
+        extra_info_stats_last_season = 'Player had no active games last year, so no previous season stats to show.'
+      }
+    } else {
+      extra_info_stats_last_season = 'This is the player\'s first season in the NFL, so no previous season stats to show.'
+    }
+  } else {
+    extra_info = extra_touchdown_info %>% filter(Name == player_name)
+    extra_info_min_year = paste0('In NFL since: ', extra_info$min_year)
+    extra_info_draft = ifelse(!is.na(extra_info$draft_round),
+                              paste0('Drafted Round ', extra_info$draft_round, ' (Pick ', extra_info$draft_pick, ') to team ', team_lookup_table$FullName[team_lookup_table$Team == extra_info$original_draft_team]),
+                              'Undrafted, or no draft info available')
+    extra_info_home = ifelse(extra_info$International == 1, 'International Game',
+                             ifelse(extra_info$Home == 1, 'Home Game', 'Away Game'))
+    if(latest_week > 1)
+    {
+      extra_info_pct_active_gs = paste0('This season, Active for ', round(100*extra_info$Pct_Active),'% of games, and Starter for ', round(100*extra_info$Pct_GS), '% of games')
+      if(!is.na(extra_info$Pct_Active) && extra_info$Pct_Active > 0)
+      {
+        extra_info_stats_this_season = paste0('This Season, Average Touchdowns (Rushing/Receiving) Per Game: ',  round(extra_info$Avg_Total_Touchdowns,1), '<br>',
+                                              'This Season, Average Targets Per Game: ',  round(extra_info$Avg_Receiving_Tgt,1), '<br>',
+                                              'This Season, Average Receptions Per Game: ', round(extra_info$Avg_Receiving_Rec, 1), '<br>',
+                                              'This Season, Average Receiving Yards After Catch Per Game: ', round(extra_info$Avg_Receiving_YAC, 1), '<br>',
+                                              'This Season, Average Rushing Yards After Catch Per Game: ', round(extra_info$Avg_Rushing_YAC, 1), '<br>')
+      } else {
+        extra_info_stats_this_season = 'Player had no active games this year, so there are no current season stats to show.'
+      }
+    } else {
+      extra_info_stats_this_season = 'Since it is only week 1, there are no current season stats to show.'
+    }
+    if(extra_info$min_year < latest_season) {
+      if(!is.na(extra_info$Last_Season_Pct_Active) && extra_info$Last_Season_Pct_Active > 0)
+      {
+        extra_info_stats_last_season = paste0('Last Season, Percent of Games Active: ', round(100*extra_info$Last_Season_Pct_Active), '%<br>',
+                                              'Last Season, Average Touchdowns (Rushing/Receiving) Per Game: ', round(extra_info$Last_Season_Total_Touchdowns_mean, 1), '<br>',
+                                              'Last Season, Standard Deviation of Touchdowns (Rushing/Receiving) Per Game: ', round(extra_info$Last_Season_Total_Touchdowns_sd, 2), '<br>',
+                                              'Last Season, Average Receiving 1st Downs Per Target: ', round(extra_info$Last_Season_Receiving_1D_Per_Tgt, 2), '%<br>',
+                                              'Last Season, Average Receiving Yards After Catch Per Game : ', extra_info$Last_Season_Receiving_YAC_max, '<br>')
+        
+      } else {
+        extra_info_stats_last_season = 'Player had no active games last year, so no previous season stats to show.'
+      }
+    } else {
+      extra_info_stats_last_season = 'This is the player\'s first season in the NFL, so no previous season stats to show.'
+    }
+  }
+  return(c(extra_info_min_year,
+           extra_info_draft,
+           extra_info_home,
+           extra_info_pct_active_gs,
+           extra_info_stats_this_season,
+           extra_info_stats_last_season))
 }
 
 
@@ -182,6 +381,35 @@ ui <- fluidPage(
      })
                      ")),
   
+  tags$script(HTML("
+     document.addEventListener('DOMContentLoaded', function() {
+                    var tab = document.querySelector('#portfolio_optimization_output')
+                     if(tab)
+                     {
+                        tab.addEventListener('click', function(e) {
+                        console.log('you clicked portfolio optimization table')
+                        row = e.target.closest('tr')
+                        console.log(row)
+                        cells = row.querySelectorAll('td')
+                        console.log(cells)
+                        headers = tab.querySelectorAll('thead th') //column names
+                        headerNames = Array.from(headers).map(h=>h.innerText)//go through each header item and get the inner text of the header
+                        console.log(headerNames)
+                        rownameCell = row.querySelector('td').textContent
+                        var betAmountIndex = headerNames.findIndex(h => h == 'BetAmount')
+                        var toPayIndex = headerNames.findIndex(h => h == 'ToPay')
+                        var betAmountValue = cells[betAmountIndex].innerText
+                        var toPayValue = cells[toPayIndex].innerText
+                        Shiny.setInputValue('click_portfolio_row', {
+                          name: rownameCell,
+                          amount: betAmountValue,
+                          topay: toPayValue
+                        })
+                       })
+                     }
+     })
+                     ")),
+  
   tabsetPanel(
     tabPanel('Bet Recommendations',
              sidebarLayout(
@@ -189,12 +417,14 @@ ui <- fluidPage(
                  width = 4,
                  uiOutput("portfolio_optimization_heading"),
                  uiOutput("max_bets_slider_ui"),
+                 uiOutput("odds_range_slider_ui"),
                  uiOutput("portfolio_optimization_bet_amt_ui"),
                  uiOutput("remove_players_ui"),
                  uiOutput("portfolio_optimization_button_ui"),
                  dataTableOutput("portfolio_optimization_output"),
                  tags$br(),
                  uiOutput("portfolio_return"),
+                 uiOutput("portfolio_risk"),
                  tags$br(),
                  uiOutput("optimization_instructions"),
                  tags$br(),
@@ -256,9 +486,17 @@ server <- function(input, output, session) {
   latest_week = max(predictions$Week)
   latest_update_time = max(predictions$updateTime)
   
+  extra_passing_info = extra_passing_info %>% filter(Week == latest_week)
+  extra_rushing_info = extra_rushing_info %>% filter(Week == latest_week)
+  extra_receiving_info = extra_receiving_info %>% filter(Week == latest_week)
+  extra_touchdown_info = extra_touchdown_info %>% filter(Week == latest_week)
+  
+  predictions = predictions %>% filter(Week == latest_week)
+  
   props_initial = future_map(.x = c('Passing', 'Rushing', 'Receiving', 'Touchdown'),
                      .f = get_props) %>%
     bind_rows()
+  props_initial$name = gsub('\\(.*\\)', '', props_initial$name) %>% trimws()
   
   props_reactive_val = reactiveVal(NULL) #initialize
   
@@ -270,7 +508,7 @@ server <- function(input, output, session) {
     ))
   } else {
     output$error_message <- renderUI(NULL)
-    props_reactive_val(props_initial)  # unlocks results()
+    props_reactive_val(props_initial) 
     output$header  <- renderText(paste(latest_season, 'Week', latest_week))
     output$header2 <- renderText(paste('Last updated:', latest_update_time))
   }
@@ -305,6 +543,7 @@ server <- function(input, output, session) {
     new_props = future_map(.x = c('Passing', 'Rushing', 'Receiving', 'Touchdown'),
                            .f = get_props) %>%
       bind_rows()
+    new_props$name = gsub('\\(.*\\)', '', new_props$name) %>% trimws()
     props_reactive_val(new_props)
     #after render:
     session$onFlushed(function() {
@@ -313,10 +552,6 @@ server <- function(input, output, session) {
     }, once = TRUE)
   })
   
-  # output$bet_size_ui = renderUI({
-  #   req(results())
-  #   numericInput(inputId = 'bet_size', label = 'Calculate expected winnings based on this bet amount:', value = 100)
-  # })
   output$type_filter_ui = renderUI({
     req(results())
     pickerInput(inputId = 'bet_type_filter', label = "Filter on bet type", choices = unique(results()$Type), multiple = TRUE)
@@ -366,7 +601,14 @@ server <- function(input, output, session) {
     {
       res = res %>% filter(Expected_Accuracy %in% input$model_accuracy_filter)
     }
-    res
+    res %>% mutate(Return = ((Model_Probability*profit_per_100 - 100*(1-Model_Probability)))/100,
+                   Risk_Raw = Model_Probability*(1 - Model_Probability)*(profit_per_100/100 + 1)^2,
+                   ratio_risk = case_when(Expected_Accuracy == 'High' ~ 1,
+                                          Expected_Accuracy == 'Medium' ~ 1.5,
+                                          Expected_Accuracy == 'Low' ~ 2,
+                                          Expected_Accuracy == 'No Data' ~ 1.7,
+                                          TRUE ~ 1),
+                   Risk_Score = Risk_Raw * ratio_risk)
   })
   
   output$instructions = renderUI({
@@ -376,16 +618,19 @@ server <- function(input, output, session) {
   output$results = renderDataTable({
     req(results_filtered())
     req(nrow(results_filtered()) > 0)
-    results = results_filtered() %>% mutate(expected_profit_per_100 = round((Model_Probability*profit_per_100 - 100*(1-Model_Probability)),2)) %>% #calculate for 100 and then adjust based on user's specified bet amount 
-      arrange(desc(expected_profit_per_100)) %>% mutate(Model_Probability = paste0(100*round(Model_Probability,2), '%'),
-                                                        Betting_Line_Implied_Prob = paste0(100*round(Betting_Line_Implied_Prob, 2), '%')) %>%
-      # rename_with(~ paste0('expected_profit_per_100'), 'expected_profit')  %>%
-      select(-profit_per_100) %>%
+    results = results_filtered() %>% 
+      mutate(Return = round(Return*100,2), Risk_Score = round(Risk_Score, 2)) %>%
+      rename('expected_return_profit_per_100' = 'Return') %>% 
+      arrange(desc(expected_return_profit_per_100)) %>%
+      mutate(Model_Probability = paste0(100*round(Model_Probability,2), '%'),
+             Betting_Line_Implied_Prob = paste0(100*round(Betting_Line_Implied_Prob, 2), '%')) %>%
+      select(-profit_per_100,-ratio_risk, -Risk_Raw) %>%
       mutate(run_time = format(force_tz(Sys.time(), "America/New_York"), "%Y-%m-%d %I:%M %p"))
     
-    
-    
-    sheet_append(ss = sheet_id, data = results, sheet = 'bet_recommendations')
+    if(difftime(Sys.time(), most_recent_save, units = 'hours') > 1)
+    {
+      sheet_append(ss = sheet_id, data = results, sheet = 'bet_recommendations')
+    }
     
     shinyjs::hide("refresh_message")
     results %>% select(-run_time) #run time was just for writing to the csv 
@@ -396,16 +641,49 @@ server <- function(input, output, session) {
     print(input$click$bet)
     output$name_text = renderText(paste('Name:', input$click$name))
     output$bet_text = renderText(paste('Bet:', ifelse(input$click$bet == 'Anytime TD Scorer', input$click$bet, paste(input$click$bet, input$click$label))))
-    showModal(modalDialog(
-      tags$h2('Import bet info here. After the game, come back to the app and go to the Update Bet Results tab to log the results (win/loss)'),
-      tags$br(),
-      textOutput("name_text"),
-      textOutput("bet_text"),
-      textInput(inputId = 'bettor_name', label = 'Put your name here', value = ''),
-      numericInput(inputId = "bet_amt", label = "How much did you bet, in dollars?", value = 10),
-      textInput(inputId = 'bet_odds', label = "What odds did you get the bet at? Put a + or - and then the number", value = input$click$odds),
-      actionButton('submit_bet', 'Submit')
+
+    strings = display_extra_info(bet_type = input$click$bet, player_name = input$click$name, latest_week = latest_week, latest_season = latest_season)
+    extra_info_min_year = strings[1]
+    extra_info_draft = strings[2]
+    extra_info_home = strings[3]
+    extra_info_pct_active_gs = strings[4]
+    extra_info_stats_this_season = strings[5]
+    extra_info_stats_last_season = strings[6]
+    subset = results() %>% filter(Player == input$click$name & Type == input$click$bet & label == input$click$label)
+
+    output$detailed_player_info =  renderUI(tagList(
+      h2(input$click$name),
+      h4(paste0(subset$Position, ' (', ifelse(subset$Starting == 1, 'Starter', 'Backup'), ')')),
+      h4(paste0('Team: ', team_lookup_table$FullName[team_lookup_table$Team == subset$Team])),
+      h4(paste0('Opp: ', team_lookup_table$FullName[team_lookup_table$Team == subset$Opp])),
+      h4(extra_info_home),
+      h4(subset$Timeslot),
+      p(paste0('Model Expected Accuracy: ', subset$Expected_Accuracy)),
+      p(paste0('Model Probability: ', round(100*subset$Model_Probability,1),'%')),
+      p(paste0('Odds: ', subset$Odds, ' (', round(100*subset$Betting_Line_Implied_Prob,1), '%)')),
+     p(extra_info_min_year),
+      p(extra_info_draft),
+      p(extra_info_pct_active_gs),
+      p(HTML(extra_info_stats_this_season)),
+      p(HTML(extra_info_stats_last_season))
     ))
+    
+    showModal(modalDialog(
+      tabsetPanel(
+        tabPanel('Log Bet',
+                  tags$h2('Import bet info here. After the game, come back to the app and go to the Update Bet Results tab to log the results (win/loss)'),
+                  tags$br(),
+                  textOutput("name_text"),
+                  textOutput("bet_text"),
+                  textInput(inputId = 'bettor_name', label = 'Put your name here', value = ''),
+                  numericInput(inputId = "bet_amt", label = "How much did you bet, in dollars?", value = 10),
+                  textInput(inputId = 'bet_odds', label = "What odds did you get the bet at? Put a + or - and then the number", value = input$click$odds),
+                  actionButton('submit_bet', 'Submit') 
+        ),
+        tabPanel('Detailed Player Info',
+                 uiOutput("detailed_player_info")
+                 )
+    )))
   })
   
   observeEvent(input$submit_bet, {
@@ -522,13 +800,22 @@ server <- function(input, output, session) {
     req(results())
     tagList(h1('Optimize Portfolio of Bets'),
               p('Be sure the bet recommendation table to the right has all your desired filters applied.'),
-            p('The optimizer takes into account expected returns, risk (based on how long-shot the odds are), model expected accuracy, and correlations between bets.')
+            p('The optimizer takes into account expected returns, risk (based on how long-shot the odds are), model expected accuracy, and correlations between bets. It only considers bets from High and Medium accuracy models.'),
+            p('When the bet portfolio list populates, click on a bet for more information.')
     )
   })
   output$max_bets_slider_ui = renderUI({
     req(results())
     sliderInput(inputId = 'max_bets', label = "Max # of Bets", value = 5, min = 1, max = 10)
   })
+  
+  output$odds_range_slider_ui = renderUI({
+    req(results())
+    sliderInput(inputId = 'odds_range', label = "Range of odds to consider. If you want the optimizer to choose, leave this as is.",
+                value = c(min(results_filtered()$Odds %>% as.numeric()),max(results_filtered()$Odds %>% as.numeric())),
+                min = min(results_filtered()$Odds %>% as.numeric()), max = max(results_filtered()$Odds %>% as.numeric()))
+  })
+  
   
   output$portfolio_optimization_bet_amt_ui = renderUI({
     req(results())
@@ -564,6 +851,11 @@ server <- function(input, output, session) {
     portfolio_res_ready_to_show(FALSE)
   })
   
+  observeEvent(input$odds_range, {
+    portfolio_res_ready_to_run(FALSE)  
+    portfolio_res_ready_to_show(FALSE)
+  })
+  
   observeEvent(input$optimization_bet_amt, {
     portfolio_res_ready_to_run(FALSE)  
     portfolio_res_ready_to_show(FALSE)
@@ -594,8 +886,8 @@ server <- function(input, output, session) {
     req(!is.null(input$optimization_bet_amt) && input$optimization_bet_amt > 0)
     positive_returns = results_filtered() %>%
       filter(!(Player %in% input$remove_players)) %>%
-      mutate(Return = ((Model_Probability*profit_per_100 - 100*(1-Model_Probability)))/100,
-             Risk= Model_Probability*(1 - Model_Probability)*(profit_per_100/100 + 1)^2) %>% 
+      filter(Expected_Accuracy %in% c('Medium', 'High')) %>%
+      filter(as.numeric(Odds) >= input$odds_range[1] & as.numeric(Odds) <= input$odds_range[2])  %>% 
       filter(Return > min_return_portfolio_optimization) 
     
     cov_matrix = matrix(NA, ncol = nrow(positive_returns), nrow = nrow(positive_returns))
@@ -608,13 +900,7 @@ server <- function(input, output, session) {
       {
         if(i == j)
         {
-          ratio_risk = case_when(positive_returns$Expected_Accuracy[i] == 'High' ~ 1,
-                                 positive_returns$Expected_Accuracy[i] == 'Medium' ~ 1.5,
-                                 positive_returns$Expected_Accuracy[i] == 'Low' ~ 2,
-                                 positive_returns$Expected_Accuracy[i] == 'No Data' ~ 1.7,
-                                 TRUE ~ 1
-                                 )
-          cov_matrix[i,j] = positive_returns$Risk[i]*ratio_risk
+          cov_matrix[i,j] = positive_returns$Risk_Score[i]
         } else {
           #if player is the same: correlation = 1
           #if player fits in one of the correlation categories, assign the correct correlation based on the correlations spreadsheet
@@ -644,8 +930,8 @@ server <- function(input, output, session) {
           } else{
             cor = 0
           }
-          cov_matrix[i, j] = cor*sqrt(positive_returns$Risk[i])*sqrt(positive_returns$Risk[j])
-          cov_matrix[j, i] = cor*sqrt(positive_returns$Risk[i])*sqrt(positive_returns$Risk[j])
+          cov_matrix[i, j] = cor*sqrt(positive_returns$Risk_Score[i])*sqrt(positive_returns$Risk_Score[j])
+          cov_matrix[j, i] = cor*sqrt(positive_returns$Risk_Score[i])*sqrt(positive_returns$Risk_Score[j])
         }
       }
     }
@@ -716,6 +1002,9 @@ server <- function(input, output, session) {
     sel = names(best_weights)
     mu_port  = sum(best_weights * mu[sel])
     
+    var_port  = as.numeric(t(best_weights) %*% Sigma[sel, sel] %*% best_weights)
+    risk_port = sqrt(var_port)
+    
     df = best_weights %>% data.frame()
     
     indx = which(colnames(cov_matrix) %in% rownames(df))
@@ -729,13 +1018,34 @@ server <- function(input, output, session) {
     df = cbind(df, from_bets_table$Odds)
     colnames(df) = c('BetWeight', 'Odds')
     portfolio_res_ready_to_show(TRUE) #ready to show, no longer waiting on update
-    list(df, mu_port)
+    list(df, mu_port, risk_port)
   })
   
   output$portfolio_optimization_output = renderDataTable({
     req(optimal_portfolio())
     req(portfolio_res_ready_to_show())
-   optimal_portfolio()[[1]] %>% mutate(BetAmount = BetWeight*input$optimization_bet_amt) %>% select(-BetWeight) %>% datatable(options = list(dom = 't')) %>% formatCurrency('BetAmount')
+   res = optimal_portfolio()[[1]] %>%
+     mutate(BetAmount = BetWeight*input$optimization_bet_amt,
+            ToPay = ifelse(as.numeric(Odds) < 0, BetAmount + BetAmount*(100/abs(as.numeric(Odds))), BetAmount + BetAmount*(as.numeric(Odds)/100))) %>%
+     select(-BetWeight) 
+   
+   tryCatch({
+     sheet_append(ss = sheet_id, data = res %>%
+                    mutate(name = rownames(res),
+                           max_bets = input$max_bets,
+                           time = format(lubridate::with_tz(Sys.time(), "America/New_York"),
+                                         "%Y-%m-%d %I:%M %p")) %>%
+                    select(max_bets, name, Odds, BetAmount, ToPay, time),
+                  sheet = 'portfolio_bet_recommendations')
+     showNotification("✅  Successfully Updated", type = "message", duration = 5)
+   }, error = function(e) {
+     showNotification(paste0("❌ Failed to write: ", e$message), type = "error", duration = 7)
+   }, finally = {
+     shinyjs::enable("write_row")
+   })
+   
+   res %>%
+     datatable(options = list(dom = 't')) %>% formatCurrency(c('BetAmount', 'ToPay'), digits = 2)
   })
   
   output$portfolio_return = renderUI({
@@ -743,6 +1053,13 @@ server <- function(input, output, session) {
     req(portfolio_res_ready_to_show())
     ev_portfolio = optimal_portfolio()[[2]]*input$optimization_bet_amt
     p(paste0('Portfolio Expected Profit for a $', input$optimization_bet_amt, ' bet: $', round(ev_portfolio)))
+  })
+  
+  output$portfolio_risk = renderUI({
+    req(optimal_portfolio())
+    req(portfolio_res_ready_to_show())
+    risk_portfolio = optimal_portfolio()[[3]]*input$optimization_bet_amt
+    p(paste0('Portfolio Risk Score: ', round(risk_portfolio,2)))
   })
   
   output$optimization_instructions = renderUI({
@@ -756,6 +1073,56 @@ server <- function(input, output, session) {
     req(portfolio_res_ready_to_show())
     actionButton('log_portfolio_optimization_bet', 'Log My Bets')
   })
+  
+  observeEvent(input$click_portfolio_row, {
+    full_name = input$click_portfolio_row$name
+    bet_amount = gsub('\\$', '', input$click_portfolio_row$amount) %>% as.numeric()
+    topay = gsub('\\$', '', input$click_portfolio_row$topay) %>% as.numeric()
+    bet_type = str_extract(full_name, 'Passing|Rushing|Receiving|(Anytime TD Scorer)')
+    if(bet_type != 'Anytime TD Scorer')
+    {
+      label_extracted = str_extract(full_name, '[0-9]+\\+')
+    } else {
+      label_extracted = 'Anytime TD Scorer'
+    }
+    player_name = gsub(bet_type, '', full_name)
+    player_name = gsub(label_extracted, '', player_name) 
+    player_name = gsub('\\+', '', player_name)  %>% trimws()
+    subset = results_filtered() %>% filter(Player == player_name & label == label_extracted & Type == bet_type)
+
+    strings = display_extra_info(bet_type = bet_type, player_name = player_name, latest_week = latest_week, latest_season = latest_season)
+    extra_info_min_year = strings[1]
+    extra_info_draft = strings[2]
+    extra_info_home = strings[3]
+    extra_info_pct_active_gs = strings[4]
+    extra_info_stats_this_season = strings[5]
+    extra_info_stats_last_season = strings[6]
+    
+    output$portfolio_optimization_more_info = renderUI(tagList(
+      h2(full_name),
+      h4(paste0(subset$Position, ' (', ifelse(subset$Starting == 1, 'Starter', 'Backup'), ')')),
+      h4(paste0('Team: ', team_lookup_table$FullName[team_lookup_table$Team == subset$Team])),
+      h4(paste0('Opp: ', team_lookup_table$FullName[team_lookup_table$Team == subset$Opp])),
+      h4(extra_info_home),
+      h4(subset$Timeslot),
+      p(paste0('Model Expected Accuracy: ', subset$Expected_Accuracy)),
+      p(paste0('Model Probability: ', round(100*subset$Model_Probability,1),'%')),
+      p(paste0('Odds: ', subset$Odds, ' (', round(100*subset$Betting_Line_Implied_Prob,1), '%)')),
+      p(paste0('Explanation: You have ', round(subset$Model_Probability*100), '% chance of profiting $', topay - bet_amount, ' and ', round((1-subset$Model_Probability)*100), '% chance of losing $', bet_amount)),
+      p(paste0('Overall expected return for this bet: $', round(subset$Return*bet_amount,2), ' (', round(subset$Return*100,1),'%)')),
+      p(extra_info_min_year),
+      p(extra_info_draft),
+      p(extra_info_pct_active_gs),
+      p(HTML(extra_info_stats_this_season)),
+      p(HTML(extra_info_stats_last_season))
+    ))
+    
+    showModal(modalDialog(
+      uiOutput('portfolio_optimization_more_info')
+    ))
+  })
+  
+
   
   observeEvent(input$log_portfolio_optimization_bet, {
   
