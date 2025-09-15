@@ -24,7 +24,7 @@ join_all_tables = function(player_bios, player_gamelogs, player_seasonal_stats,
 
   player_data = player_bios %>%
     inner_join(player_gamelogs %>%
-                select(-Position, -Name, -Playoffs), #duplicate names with other tables
+                select(-any_of(c("Position", "Name", "Playoffs", "Opp", "Date", "Game_Location", "Month"))), #duplicate names with other tables
               join_by('player_id' == 'player_id')) %>%
     left_join(player_seasonal_stats %>%
                 rename_with(.cols = matches("sum|mean|median|max|min|sd|Pct|Per"),
@@ -46,8 +46,8 @@ join_all_tables = function(player_bios, player_gamelogs, player_seasonal_stats,
                   .fn = ~paste0('Team_',.x)),
               join_by('Team' == 'Team', 'Season' == 'Season', 'Week' == 'Week')) %>%
     left_join(team_gamelogs %>%
-                select(Season, Team, Week, Short_Week, Long_Week, matches('(Win)|(Differential)|(Defense)')) %>%
-                select(Season, Team, Week, Short_Week, Long_Week, matches('Cumulative|Pct|Avg|Min|Max|Median|SD|Last3')) %>%
+                select(Season, Team, Opp, Week, Short_Week, Long_Week, matches('(Win)|(Differential)|(Defense)')) %>%
+                select(Season, Team, Opp, Week, Short_Week, Long_Week, matches('Cumulative|Pct|Avg|Min|Max|Median|SD|Last3')) %>%
                 rename_with(
                   .cols = matches('Defense'),
                   .fn = ~paste0('Opp_',.x, '_Allowed')) %>%
@@ -152,7 +152,7 @@ join_all_tables = function(player_bios, player_gamelogs, player_seasonal_stats,
   
   #get data for each model:
   passing_data = player_data %>% filter(str_detect(positions, 'QB') & Season >= season_data_cutoff) %>%
-    left_join(qb1_by_year, join_by('Season' == 'Season', 'Team' == 'Team', 'names' == 'Qb1')) %>%
+    left_join(qb1_by_year %>% mutate(Temp = 1), join_by('Season' == 'Season', 'Team' == 'Team', 'names' == 'Qb1')) %>%
     #Qb1_starting doesn't make sense for the QB model, so deriving new field that says whether this QB is the QB1 is better:
     mutate(Is_Qb1 = ifelse(!is.na(Temp), 1, 0)) %>% select(-Temp) %>% select(-Qb1_starting)
   
@@ -160,7 +160,7 @@ join_all_tables = function(player_bios, player_gamelogs, player_seasonal_stats,
   receiving_data = player_data %>% filter((!str_detect(positions, 'QB')) & Season >= season_data_cutoff)
   
   touchdown_data = player_data %>%
-    left_join(qb1_by_year, join_by('Season' == 'Season', 'Team' == 'Team', 'names' == 'Qb1')) %>%
+    left_join(qb1_by_year %>% mutate(Temp = 1), join_by('Season' == 'Season', 'Team' == 'Team', 'names' == 'Qb1')) %>%
     #Qb1_starting doesn't make sense for the QB model, so deriving new field that says whether this QB is the QB1 is better:
     mutate(Is_Qb1 = ifelse(str_detect(positions, 'QB'), ifelse(!is.na(Temp), 1, 0), NA),
            Qb1_starting = ifelse(str_detect(positions, 'QB'), NA, Qb1_starting)) %>%
