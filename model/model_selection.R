@@ -125,12 +125,37 @@ for(i in 1:length(model_names))
   gc()
 }
 
+list_of_top_vars = list()
+noncurrent_vars = list()
+nonstats = list()
+col_categories = list(passing_data_column_categories, rushing_data_column_categories, receiving_data_column_categories, touchdown_data_column_categories)
 for(i in 1:length(model_names))
 {
+  print(i)
+  this_mod_list = c()
+  noncurrentseason_list = c()
+  nonstats_list = c()
   for (r in response_list[[i]])
   {
+    print(r)
     mod = readRDS(paste0('model/tunings_and_models/', model_names[i],'/',type,'/','model_',tolower(r),'.rds'))
     summary(mod)
+    if(summary(mod)$rel_inf[1] < 70)
+    {
+      this_mod_list = c(this_mod_list, summary(mod)$var[1:20])
+      categories_not_current_season = names(col_categories[[i]])[str_detect(names(col_categories[[i]]), 'current_season')]
+      categories_nonstats = names(col_categories[[i]])[str_detect(names(col_categories[[i]]), 'season')]
+      non_current_season = setdiff(summary(mod)$var[summary(mod)$rel_inf > 0], col_categories[[i]][categories_not_current_season] %>% unlist() %>% as.character())
+      noncurrentseason_list = c(noncurrentseason_list, non_current_season)
+      non_stats_vars = setdiff(summary(mod)$var[summary(mod)$rel_inf > 0], col_categories[[i]][categories_nonstats] %>% unlist() %>% as.character())
+      nonstats_list = c(nonstats_list, non_stats_vars)
+    }
   }
+  list_of_top_vars[[model_names[i]]] = this_mod_list
+  noncurrent_vars[[model_names[i]]] = noncurrentseason_list
+  nonstats[[model_names[i]]] = nonstats_list
 }
 
+lapply(list_of_top_vars, function(x) sort(table(x), decreasing = TRUE)[1:10])
+lapply(noncurrent_vars, function(x) sort(table(x), decreasing = TRUE)[1:10])
+lapply(nonstats, function(x) sort(table(x), decreasing = TRUE)[1:20])
