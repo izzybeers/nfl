@@ -20,6 +20,9 @@ get_players_target_rankings = function(min_year, max_year, player_gamelogs, play
       mutate(Qb1_starting = ifelse(!is.na(Temp), 1, 0)) %>%
       group_by(Season, Week, Team) %>% summarise(Qb1_starting = max(Qb1_starting)) %>%
       arrange(Season, Team, Week)
+    
+    df = df %>% filter(!is.na(Receiving_Yds) | !is.na(Rushing_Yds) | !is.na(Passing_Yds))
+
   } else {
     qb_starters = manual_qb_starters %>% mutate(Season = max_year, Week = wk) %>% select(Season, Week, Team, Qb1_starting)
   }
@@ -44,7 +47,7 @@ get_players_target_rankings = function(min_year, max_year, player_gamelogs, play
       if(sum(!is.na(df$Receiving_Yds)) > 0) #games with receiving data this year
       {
       receiving_subtable = df %>%
-        filter(Team == t & Season == y & !is.na(Receiving_Yds)) %>%
+        filter(Team == t & Season == y) %>%
         select(player_id, Name, Season, Team, Position, Week, contains('Receiving')) %>%
         group_by(Week) %>%
         mutate(Target_Rank_Median_Season = dense_rank(desc(Median_Receiving_Tgt)),
@@ -78,7 +81,7 @@ get_players_target_rankings = function(min_year, max_year, player_gamelogs, play
       if(sum(!is.na(df$Rushing_Yds)) > 0)
       {
         rushing_subtable_nonqb = df %>%
-          filter(Team == t & Season == y & !is.na(Rushing_Yds) & !str_detect('QB', Position)) %>%
+          filter(Team == t & Season == y & !str_detect('QB', Position)) %>%
           select(player_id, Name, Position, Week, contains('Rushing')) %>%
           group_by(Week) %>%
           #Rushing attempts rankings shouldn't count qbs because qbs can rush whenever they want. The purpose of this is to show how often the play goes to them, so that only makes sense for RBs.
@@ -88,7 +91,7 @@ get_players_target_rankings = function(min_year, max_year, player_gamelogs, play
           select(player_id, Name, Position, Week, Rushing_Att, Last3_Median_Rushing_Att, Median_Rushing_Att, Rushing_Att_Rank_Median_Season, Rushing_Att_Rank_Median_Last3)
         
         rushing_subtable_all = df %>%
-          filter(Team == t & Season == y & !is.na(Rushing_Yds)) %>%
+          filter(Team == t & Season == y) %>%
           select(player_id, Name, Season, Team, Position, Week, contains('Rushing')) %>%
           group_by(Week) %>%
           #qbs can be included in rankings for rushing yards:

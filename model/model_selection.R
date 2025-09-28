@@ -125,12 +125,22 @@ for(i in 1:length(model_names))
   gc()
 }
 
+list_of_top_vars = list()
 for(i in 1:length(model_names))
 {
+  print(i)
+  this_mod_list = list()
   for (r in response_list[[i]])
   {
+    print(r)
     mod = readRDS(paste0('model/tunings_and_models/', model_names[i],'/',type,'/','model_',tolower(r),'.rds'))
     summary(mod)
+    if(summary(mod)$rel_inf[1] < 70)
+    {
+      this_mod_list[[r]] =  paste(summary(mod)$var[1:20],summary(mod)$rel_inf[1:20])
+    }
   }
+  list_of_top_vars[[model_names[i]]] = this_mod_list
 }
 
+list_of_top_vars

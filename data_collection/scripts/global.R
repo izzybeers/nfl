@@ -13,6 +13,8 @@ options(chromote.headless = "new")
 Sys.setenv(CHROMOTE_CHROME = "/Users/izzybeers/chrome-headless-shell/mac-136.0.7103.49/chrome-headless-shell-mac-x64/chrome-headless-shell")
 
 team_lookup_table = read.csv('https://docs.google.com/spreadsheets/d/1DSSz4X-3LLAarRlBRtuMsGJ1hh2FDdVeHJZFdpZGW0A/export?format=csv&gid=0')
+alternate_names_lookup_table = read.csv('https://docs.google.com/spreadsheets/d/1DSSz4X-3LLAarRlBRtuMsGJ1hh2FDdVeHJZFdpZGW0A/export?format=csv&gid=743973114')
+  
 
 #any changes to here also need to be made in app.r since published apps can't access this file:
 passing_numbers = seq(150,360,30)
@@ -106,7 +108,7 @@ get_player_bio = function(player_row)
   }
   
   #player bio:
-  info = html_response %>% html_nodes("p") %>% html_text(trim = TRUE)
+    info = html_response %>% html_nodes("p") %>% html_text(trim = TRUE)
   
   
   
@@ -226,8 +228,9 @@ prepare_gamelog_table = function(df, df_advanced_p = NULL, df_advanced_rr = NULL
         df_advanced_p = df_advanced_p[2:nrow(df_advanced_p),]
         colnames(df_advanced_p)[which(colnames(df_advanced_p) == '')] = 'Game_Location'
         df_advanced_p = df_advanced_p[,-which(str_detect(colnames(df_advanced_p), '\\/|%'))] %>%
-          filter(GS %in% c('*', '') & (Gtm != '' & !is.na(Gtm))) %>%
-          conditionally_remove(c('Rk', 'Gcar', 'Week', 'Date', 'Team', 'Game_Location', 'Opp', 'Result', 'GS', 'Snap Counts_DefSnp'))
+          filter(GS %in% c('*', '') & (Gtm != '' & !is.na(Gtm)))
+        df_advanced_p = df_advanced_p%>%
+          select(-any_of(c('Rk', 'Gcar', 'Snap Counts_DefSnp')))
           
       }
       
@@ -306,6 +309,13 @@ prepare_gamelog_table = function(df, df_advanced_p = NULL, df_advanced_rr = NULL
     }
 }
 
+clean_names = function(name)
+{
+  #\\b means word boundary
+  #str_squish() prevents any double spaces inside the string, trimws() trims trailing and leading whitespaces
+  return(tolower(name) %>% str_remove_all("[[:punct:]]+") %>% str_remove("\\b(jr|sr|i{1,3}|iv|v|vi{1,3}|ix|x|xi{1,3})\\b") %>% str_squish() %>% trimws())
+}
+
 get_current_team = function(link_suffix)
 {
   url = paste0("https://www.pro-football-reference.com", link_suffix)
@@ -327,30 +337,64 @@ get_season_schedule = function(season, wk, team = NULL)
   } else {
      schedule_table = NULL
   }
-  if('Winner/tie' %in% colnames(schedule_table))
+  row_cutoffs = which(schedule_table$Week == 'Week')
+  table_starts = c(1, row_cutoffs + 1)
+  table_ends = c(row_cutoffs - 1, nrow(schedule_table))
+  upcoming_games = rbind()
+  finished_games = rbind()
+  for (t in 1:length(table_starts))
   {
-    colnames(schedule_table) = c('Week', 'Day', 'Date', 'Time', 'Winner', 'at_symbol', 'Loser', 'boxscore', 'WinPts', 'LosePts', 'YdsW', 'TOW', 'YdsL', 'TOL') 
-    schedule_table = schedule_table %>%
-      mutate(Home = case_when(at_symbol == '@' ~ Loser,  .default = Winner),
-             Away = case_when(at_symbol == '@' ~ Winner,  .default = Loser))
-    schedule_table = schedule_table %>% filter(Week == wk) %>% select(Week, Date, Away, Home) %>%
-      left_join(team_lookup_table %>% select(FullName, Team) %>% rename('HomeTeam' = 'Team'), join_by('Home' == 'FullName')) %>%
-      left_join(team_lookup_table %>% select(FullName, Team) %>% rename('AwayTeam' = 'Team'), join_by('Away' == 'FullName')) %>%
-      select(-c('Home','Away'))
-  } else {
-    colnames(schedule_table) = c('Week', 'Day', 'Date', 'Away', 'AwayPts', 'at_symbol', 'Home', 'HomePts', 'Time')
-    schedule_table = schedule_table %>% filter(Week == wk) %>% select(Week, Date, Away, Home) %>%
-      mutate(Date = as.Date(Date, format = "%B %d, %Y")) %>%
-      left_join(team_lookup_table %>% select(FullName, Team) %>% rename('HomeTeam' = 'Team'), join_by('Home' == 'FullName')) %>%
-      left_join(team_lookup_table %>% select(FullName, Team) %>% rename('AwayTeam' = 'Team'), join_by('Away' == 'FullName')) %>%
-      select(-c('Home','Away'))
-    
+    start_point = table_starts[t]
+    end_point = table_ends[t]
+    if(t==1)
+    {
+      names = colnames(schedule_table)
+    } else {
+      names = schedule_table[row_cutoffs[t-1],] %>% as.character()
+    }
+    if('Visitor' %in% names)
+    {
+      upcoming_games = rbind(upcoming_games, schedule_table[start_point:end_point,])
+    } else {
+      finished_games = rbind(finished_games, schedule_table[start_point:end_point,])
+    }
   }
-  schedule_table = rbind(schedule_table %>% mutate(Team = HomeTeam, Opp = AwayTeam, Game_Location = 'Home'), schedule_table %>% mutate(Team = AwayTeam, Opp = HomeTeam, Game_Location = 'Away')) %>%
-    select(Week, Date, Team, Opp, Game_Location)
-  if(!is.null(team))
+  upcoming_games = upcoming_games[,c(1,2,3,4,5,7)]
+  colnames(upcoming_games) = c('Week', 'Day', 'Date', 'Time', 'Away', 'Home')
+  upcoming_games = upcoming_games %>% filter(Week == wk) %>% select(Week, Date, Away, Home) %>%
+    left_join(team_lookup_table %>% select(FullName, Team) %>% rename('HomeTeam' = 'Team'), join_by('Home' == 'FullName')) %>%
+    left_join(team_lookup_table %>% select(FullName, Team) %>% rename('AwayTeam' = 'Team'), join_by('Away' == 'FullName')) %>%
+    select(-c('Home','Away'))
+  
+  colnames(finished_games) = c('Week', 'Day', 'Date', 'Time', 'Winner', 'at_symbol', 'Loser', 'boxscore', 'WinPts', 'LosePts', 'YdsW', 'TOW', 'YdsL', 'TOL') 
+  finished_games = finished_games %>%
+    mutate(Home = case_when(at_symbol == '@' ~ Loser,  .default = Winner),
+           Away = case_when(at_symbol == '@' ~ Winner,  .default = Loser))
+  finished_games = finished_games %>% filter(Week == wk) %>% select(Week, Date, Away, Home) %>%
+    left_join(team_lookup_table %>% select(FullName, Team) %>% rename('HomeTeam' = 'Team'), join_by('Home' == 'FullName')) %>%
+    left_join(team_lookup_table %>% select(FullName, Team) %>% rename('AwayTeam' = 'Team'), join_by('Away' == 'FullName')) %>%
+    select(-c('Home','Away'))
+    
+  if(nrow(upcoming_games) > 0)
   {
-    schedule_table = schedule_table %>% filter(Team == team)
+    upcoming_games = rbind(upcoming_games %>% mutate(Team = HomeTeam, Opp = AwayTeam, Game_Location = 'Home'), upcoming_games %>% mutate(Team = AwayTeam, Opp = HomeTeam, Game_Location = 'Away')) %>%
+      select(Week, Date, Team, Opp, Game_Location)
+    
+    if(!is.null(team))
+    {
+      upcoming_games = upcoming_games %>% filter(Team == team)
+    }
+    return(upcoming_games)
+  }
+  if(nrow(finished_games) > 0)
+  {
+    finished_games = rbind(finished_games %>% mutate(Team = HomeTeam, Opp = AwayTeam, Game_Location = 'Home'), finished_games %>% mutate(Team = AwayTeam, Opp = HomeTeam, Game_Location = 'Away')) %>%
+      select(Week, Date, Team, Opp, Game_Location)
+    if(!is.null(team))
+    {
+      finished_games = finished_games %>% filter(Team == team)
+    }
+    return(finished_games)
   }
   
   return(schedule_table)
@@ -574,6 +618,7 @@ compute_slider_cumulatives = function(df, basic_cols = c()) {
   {
 
     vals = df[[c]]
+    
     
     # Cumulative up to each game
     df[[paste0("Cumulative_", c)]] = slide_dbl(vals, ~ ifelse(length(.x) == 0, NA_real_, sum(.x, na.rm = TRUE)), .before = Inf, .after = -1, .complete = TRUE)
@@ -814,7 +859,7 @@ get_forecasted_weather = function(timestamp, lat, long, api_key)
   
   res = GET(url)
   results = content(res, as = "parsed")
-  if(difftime(timestamp, Sys.time(), units = "hours") %>% as.numeric() < 47)
+  if(difftime(timestamp, Sys.time(), units = "hours") %>% as.numeric() < 47 & difftime(timestamp, Sys.time(), units = "hours") %>% as.numeric() > 0)
   {
     index = which(sapply(1:length(results$hourly), function(x) as.POSIXct(results$hourly[[x]]$dt, origin = "1970-01-01", tz = "America/New_York") == timestamp))
     temp = results$hourly[[index]]$temp
