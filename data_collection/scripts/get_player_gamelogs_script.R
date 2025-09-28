@@ -93,6 +93,30 @@ get_player_gamelogs = function(player_bios, year_cutoff, max_year_cutoff, basic_
                                                Gtm = 1, Week = 1,
                                                Team = team_lookup_table$Team[team_lookup_table$FullName == player_bios$current_team[p]])
                                                
+        } else {#could have been an error. retry.
+          retry = 1
+          while(is.null(gamelog_with_stats) & retry <= 3)
+          {
+            wait = runif(1,3,5)
+            Sys.sleep(wait)
+            gamelog_with_stats = tryCatch({
+              get_game_log(player_row = player_bios[p,],
+                           yr = y,
+                           gamelog_table_tag = gamelog_html_table_tag,
+                           gamelog_playoffs_table_tag = gamelog_html_playoff_table_tag,
+                           gamelog_advanced_rushing_table_tag = gamelog_advanced_html_rushing_table_tag,
+                           gamelog_advanced_passing_table_tag = gamelog_advanced_html_passing_table_tag,
+                           gamelog_advanced_playoffs_passing_table_tag = gamelog_advanced_playoffs_html_passing_table_tag,
+                           gamelog_advanced_playoffs_rushing_table_tag = gamelog_advanced_playoffs_html_rushing_table_tag)
+            }, error = function(e) {
+              return(NULL)
+            })
+            retry = retry + 1 #retry increments until 3, and if gamelog_with_stats is still null, try while loop again
+          }
+          if(retry > 3 & is.null(gamelog_with_stats))
+          {
+            print(paste('Unable to scrape:',player_bios$names[p], y))
+          }
         }
       }
       wait = runif(1,3,5)
@@ -107,7 +131,11 @@ get_player_gamelogs = function(player_bios, year_cutoff, max_year_cutoff, basic_
   } else { 
     player_bios = player_bios %>% filter(max_year >= year_cutoff & min_year <= max_year_cutoff)
   }
-  player_bios = player_bios %>% filter(!is.na(current_team) & current_team %in% team_lookup_table$FullName) #must be on an active team
+  if(!is.null(wk)) #mid-season pull:
+  {
+    player_bios = player_bios %>% filter(!is.na(current_team) & current_team %in% team_lookup_table$FullName) #must be on an active team
+  }
+  
   
   if(predict_mode == TRUE)
   {
@@ -288,7 +316,7 @@ get_player_gamelogs = function(player_bios, year_cutoff, max_year_cutoff, basic_
     gamelogs[,other_columns] = NA
     gamelogs_df = gamelogs
   } else { #response only -- just grabbing the response variable
-    gamelogs_df  = gamelogs %>% filter(Week == wk) %>% select(player_id, Season, Week, any_of(c('Passing_Yds', 'Rushing_Yds', 'Receiving_Yds', 'Total_Nonpass_Touchdowns')))
+    gamelogs_df  = gamelogs %>% filter(Week == wk) %>% select(player_id, Season, Week, any_of(c('Passing_Yds', 'Rushing_Yds', 'Receiving_Yds', 'Total_Touchdowns', 'GS')))
   }
   
   # saveRDS(gamelogs_df, 'saved_data_files/player_gamelogs.rds')
