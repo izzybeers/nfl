@@ -13,6 +13,8 @@ options(chromote.headless = "new")
 Sys.setenv(CHROMOTE_CHROME = "/Users/izzybeers/chrome-headless-shell/mac-136.0.7103.49/chrome-headless-shell-mac-x64/chrome-headless-shell")
 
 team_lookup_table = read.csv('https://docs.google.com/spreadsheets/d/1DSSz4X-3LLAarRlBRtuMsGJ1hh2FDdVeHJZFdpZGW0A/export?format=csv&gid=0')
+alternate_names_lookup_table = read.csv('https://docs.google.com/spreadsheets/d/1DSSz4X-3LLAarRlBRtuMsGJ1hh2FDdVeHJZFdpZGW0A/export?format=csv&gid=743973114')
+  
 
 #any changes to here also need to be made in app.r since published apps can't access this file:
 passing_numbers = seq(150,360,30)
@@ -106,7 +108,7 @@ get_player_bio = function(player_row)
   }
   
   #player bio:
-  info = html_response %>% html_nodes("p") %>% html_text(trim = TRUE)
+    info = html_response %>% html_nodes("p") %>% html_text(trim = TRUE)
   
   
   
@@ -226,8 +228,9 @@ prepare_gamelog_table = function(df, df_advanced_p = NULL, df_advanced_rr = NULL
         df_advanced_p = df_advanced_p[2:nrow(df_advanced_p),]
         colnames(df_advanced_p)[which(colnames(df_advanced_p) == '')] = 'Game_Location'
         df_advanced_p = df_advanced_p[,-which(str_detect(colnames(df_advanced_p), '\\/|%'))] %>%
-          filter(GS %in% c('*', '') & (Gtm != '' & !is.na(Gtm))) %>%
-          conditionally_remove(c('Rk', 'Gcar', 'Week', 'Date', 'Team', 'Game_Location', 'Opp', 'Result', 'GS', 'Snap Counts_DefSnp'))
+          filter(GS %in% c('*', '') & (Gtm != '' & !is.na(Gtm)))
+        df_advanced_p = df_advanced_p%>%
+          select(-any_of(c('Rk', 'Gcar', 'Snap Counts_DefSnp')))
           
       }
       
@@ -304,6 +307,13 @@ prepare_gamelog_table = function(df, df_advanced_p = NULL, df_advanced_rr = NULL
     } else {
   return(NULL)
     }
+}
+
+clean_names = function(name)
+{
+  #\\b means word boundary
+  #str_squish() prevents any double spaces inside the string, trimws() trims trailing and leading whitespaces
+  return(tolower(name) %>% str_remove_all("[[:punct:]]+") %>% str_remove("\\b(jr|sr|i{1,3}|iv|v|vi{1,3}|ix|x|xi{1,3})\\b") %>% str_squish() %>% trimws())
 }
 
 get_current_team = function(link_suffix)
