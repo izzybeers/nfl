@@ -37,8 +37,27 @@ player_bios = get_player_bios(year_cutoff = data_collection_min_year, max_year_c
 saveRDS(player_bios, 'data_collection/saved_data_files/player_bios.rds')
 
 #player_bios = readRDS('data_collection/saved_data_files/player_bios.rds')
+player_gamelogs = readRDS('data_collection/saved_data_files/player_gamelogs.rds')
+missing_players_full_data = player_gamelogs %>%
+  inner_join(player_bios %>% select(player_id, min_year, max_year), join_by('player_id')) %>%
+  filter(max_year >= 2020) %>%
+  mutate(min_year = ifelse(min_year < 2020, 2020, min_year)) %>%
+  mutate(num_years_in_nfl = (max_year - min_year + 1)) %>%
+  group_by(player_id) %>%
+  summarise(min_year = max(min_year), max_year = max(max_year), num_years_data = length(unique(Season)),
+         num_years_in_nfl = max(num_years_in_nfl)) %>%
+  filter(num_years_data != num_years_in_nfl) %>%
+  select(player_id) %>% distinct() %>% pull()
 
+player_bios_subset = player_bios %>% filter(player_id %in% missing_players_full_data & (is.na(current_team) | !(current_team %in% team_lookup_table$FullName)))
 
+hold = player_gamelogs_missing
+
+player_gamelogs_missing = get_player_gamelogs(year_cutoff = data_collection_min_year, max_year_cutoff = max_year, player_bios = player_bios_subset, basic_cols = basic_cols, missing_threshold = missing_cutoff,
+                                      gamelog_html_table_tag, gamelog_html_playoff_table_tag, gamelog_advanced_html_rushing_table_tag, gamelog_advanced_html_passing_table_tag, gamelog_advanced_playoffs_html_passing_table_tag, gamelog_advanced_playoffs_html_rushing_table_tag,
+                                      predict_mode = FALSE)
+player_gamelogs_missing = rbind(player_gamelogs_missing, hold)
+new = player_gamelogs_missing %>% left_join(combined_gamelogs %>% select(player_id,Season,Week), join_by('player_id', 'Season')) %>% filter(is.na(Week.y)) %>% select(-Week.y)
 
 player_gamelogs = get_player_gamelogs(year_cutoff = data_collection_min_year, max_year_cutoff = max_year, player_bios = player_bios, basic_cols = basic_cols, missing_threshold = missing_cutoff,
                     gamelog_html_table_tag, gamelog_html_playoff_table_tag, gamelog_advanced_html_rushing_table_tag, gamelog_advanced_html_passing_table_tag, gamelog_advanced_playoffs_html_passing_table_tag, gamelog_advanced_playoffs_html_rushing_table_tag,
