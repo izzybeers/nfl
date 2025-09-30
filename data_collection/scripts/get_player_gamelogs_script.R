@@ -35,7 +35,8 @@ get_player_gamelogs = function(player_bios, year_cutoff, max_year_cutoff, basic_
                        gamelog_advanced_rushing_table_tag = gamelog_advanced_html_rushing_table_tag,
                        gamelog_advanced_passing_table_tag = gamelog_advanced_html_passing_table_tag,
                        gamelog_advanced_playoffs_passing_table_tag = gamelog_advanced_playoffs_html_passing_table_tag,
-                       gamelog_advanced_playoffs_rushing_table_tag = gamelog_advanced_playoffs_html_rushing_table_tag)
+                       gamelog_advanced_playoffs_rushing_table_tag = gamelog_advanced_playoffs_html_rushing_table_tag,
+                       wk = wk)
         }, error = function(e) {
             return(NULL)
           })
@@ -45,7 +46,12 @@ get_player_gamelogs = function(player_bios, year_cutoff, max_year_cutoff, basic_
         {
           current_team = player_bios$current_team[p] #in full name form
           current_team_abbr = team_lookup_table$Team[team_lookup_table$FullName == current_team]
-          new_gtm = gamelog_with_stats %>% filter(Week < wk) %>% select(Gtm) %>% pull() %>% max() + 1
+          if(nrow(gamelog_with_stats %>% filter(Week < wk)) > 0)
+          {
+            new_gtm = gamelog_with_stats %>% filter(Week < wk) %>% select(Gtm) %>% pull() %>% max() + 1
+          } else {
+            new_gtm = NA %>% as.numeric()
+          }
           upcoming_schedule = schedule %>% filter(Team == current_team_abbr)
           upcoming_schedule = upcoming_schedule %>% mutate(player_id = player_bios$player_id[p],
                                                            Name = player_bios$names[p],
@@ -56,7 +62,16 @@ get_player_gamelogs = function(player_bios, year_cutoff, max_year_cutoff, basic_
                                                            )
            
            #placeholder in for the upcoming week to calculate stats on it:
-          gamelog_with_stats = bind_rows(gamelog_with_stats %>% filter(Week < wk), upcoming_schedule)
+          if(nrow(gamelog_with_stats %>% filter(Week < wk)) > 0)
+          {
+            gamelog_with_stats = bind_rows(gamelog_with_stats %>% filter(Week < wk), upcoming_schedule)
+          } else { #upcoming week is the player's first week of the season
+            upcoming_schedule[,setdiff(colnames(gamelog_with_stats), colnames(upcoming_schedule))] = NA
+            upcoming_schedule$day_of_week = weekdays(as.Date(upcoming_schedule$Date))
+            upcoming_schedule$Month = format(as.Date(upcoming_schedule$Date), "%m")
+            upcoming_schedule$Playoffs = ifelse(wk < ifelse(upcoming_schedule$Season <= 2020, 17, 18), 0, 1)
+            gamelog_with_stats = upcoming_schedule
+          }
         }
         gamelog_with_stats[which(gamelog_with_stats$Active == 0), setdiff(colnames(gamelog_with_stats), c(basic_cols, 'Active'))] = NA
         # gamelog_with_stats = gamelog_with_stats %>% arrange(Week) %>% get_cumulative(last3 = FALSE, skip = basic_cols, team = team_cols)
@@ -119,6 +134,16 @@ get_player_gamelogs = function(player_bios, year_cutoff, max_year_cutoff, basic_
           }
         }
       }
+      # if(is.null(gamelog_with_stats) || nrow(gamelog_with_stats) > 0) # still missing
+      # {
+      #   gamelog_with_stats = upcoming_schedule %>% mutate(player_id = player_bios$player_id[p],
+      #                                                    Name = player_bios$names[p],
+      #                                                    Season = y,
+      #                                                    Gtm = new_gtm,
+      #                                                    Position = player_bios$positions[p],
+      #                                                    Week = as.numeric(Week)
+      #   )
+      # }
       wait = runif(1,3,5)
       Sys.sleep(wait)
       gamelogs_all_years = bind_rows(gamelogs_all_years, gamelog_with_stats)

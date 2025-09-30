@@ -141,10 +141,15 @@ get_props <- function(bet_category) {
   }
 }
 
+clean_names = function(name)
+{
+  return(tolower(name) %>% str_remove_all("[[:punct:]]+") %>% str_remove("\\b(jr|sr|i{1,3}|iv|v|vi{1,3}|ix|x|xi{1,3})\\b") %>% str_squish() %>% trimws())
+}
+
 join_preds_and_props = function(preds, props)
 {
   preds$Type = ifelse(preds$Response == 'Anytime_Touchdown', 'Anytime TD Scorer', sapply(strsplit(preds$Response, '_'), function(x) x[1]))
-  joined = preds %>% left_join(props, join_by('names' == 'name', 'label' == 'label', 'Type' == 'Type')) %>% filter(!is.na(marketId)) %>%
+  joined = preds %>% mutate(cleaned_names = clean_names(names)) %>% left_join(props %>% mutate(cleaned_name = clean_names(name)), join_by('cleaned_names' == 'cleaned_name', 'label' == 'label', 'Type' == 'Type')) %>% filter(!is.na(marketId)) %>%
     mutate(Betting_Line_Implied_Prob = ifelse(as.numeric(Odds) < 0, (-1)*as.numeric(Odds) / ((-1)*as.numeric(Odds) + 100), 100 / (as.numeric(Odds) + 100)),
            Timeslot = paste(Day, Time_of_Day)) %>%
     rename('Player' = 'names') %>%
@@ -617,7 +622,9 @@ server <- function(input, output, session) {
     req(results())
     req(nrow(results()) > 0)
     
+    
     res = results()
+    
     if(!is.null(input$bet_type_filter))
     {
       res = res %>% filter(Type %in% input$bet_type_filter)
