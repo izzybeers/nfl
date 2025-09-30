@@ -27,7 +27,7 @@ get_injuries_data = function(min_year, max_year, wk = NULL)
       tables = injuries_html %>% html_nodes("table.d3-o-table--detailed")
       if(length(tables) == 0)
       {
-        injuries_table = data.frame(Season = y, Week = w, Team = NA, Player = NA, Position = NA, Less_Practice = NA, Game_Status = NA, On_Injury_List = NA)
+        injuries_table = data.frame(Season = y, Week = w, Team = NA, Player = NA %>% as.character(), Position = NA, Less_Practice = NA %>% as.numeric(), Game_Status = NA %>% as.character(), On_Injury_List = NA %>% as.numeric())
       } else {
         j = 0
         while((length(xml_children(injuries_html)) <= 1 | length(tables) == 0) & (j < 5))
@@ -65,6 +65,7 @@ get_injuries_data = function(min_year, max_year, wk = NULL)
                  Less_Practice = ifelse(Practice.Status %in% c('Limited Participation in Practice', 'Did Not Participate In Practice'), 0, 1),
                  On_Injury_List = 1) %>%
           rename(Game_Status = Game.Status) %>%
+          mutate(Game_Status = as.character(Game_Status)) %>%
           select(Season, Week, Team, Player, Position, Less_Practice, Game_Status, On_Injury_List)
         
         # Combine the data into a data frame
