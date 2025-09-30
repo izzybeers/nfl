@@ -23,14 +23,15 @@ basic_cols = c('player_id', 'Name', 'names', 'Position', 'Month', 'Gtm', 'Week',
 missing_cutoff = 0.95
 
 this_season = 2025
-this_week = 4
+this_week = 5
 data_collection_min_year = this_season - 2 #need 2 years of historical data for feature engineering
 qb1_by_year = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vT9_LcNO2d8L5kzbJQZZti9kxfAZRFRAl2oJz5WlpusfvL1txbkc8OU6BSlB54TA9HCBHRlIxi9MpuT/pub?gid=1914165552&single=true&output=csv') %>%
   filter(Season == this_season)
 
 
 # player_bios = readRDS('data_collection/saved_data_files/player_bios.rds')
-player_bios = get_player_bios(year_cutoff = 2022, max_year_cutoff = this_season) #update this occasionally due to players changing teams
+player_bios = get_player_bios(year_cutoff = 2020, max_year_cutoff = this_season) #update this occasionally due to players changing teams
+saveRDS(player_bios, 'data_collection/saved_data_files/player_bios.rds')
 
 #get results from_last_week: passing_yds, rushing_yds, receiving_yds, etc:
 player_gamelogs_results = get_player_gamelogs(year_cutoff = this_season, max_year_cutoff = this_season, player_bios = player_bios[which(player_bios$max_year == this_season),], basic_cols = basic_cols, missing_threshold = missing_cutoff,
@@ -42,10 +43,10 @@ missing_player_gamelogs_results = get_player_gamelogs(year_cutoff = this_season,
                                               gamelog_html_table_tag, gamelog_html_playoff_table_tag, gamelog_advanced_html_rushing_table_tag, gamelog_advanced_html_passing_table_tag, gamelog_advanced_playoffs_html_passing_table_tag, gamelog_advanced_playoffs_html_rushing_table_tag,
                                               wk = this_week - 1, response_only = FALSE)
 
-passing_results = player_gamelogs_results %>% select(player_id, Season, Week, Passing_Yds)
-rushing_results = player_gamelogs_results %>% select(player_id, Season, Week, Rushing_Yds)
-receiving_results = player_gamelogs_results %>% select(player_id, Season, Week, Receiving_Yds)
-touchdown_results = player_gamelogs_results %>% select(player_id, Season, Week, Total_Touchdowns)
+passing_results = player_gamelogs_results %>% select(player_id, Season, Week, Passing_Yds,GS)
+rushing_results = player_gamelogs_results %>% select(player_id, Season, Week, Rushing_Yds,GS)
+receiving_results = player_gamelogs_results %>% select(player_id, Season, Week, Receiving_Yds,GS)
+touchdown_results = player_gamelogs_results %>% select(player_id, Season, Week, Total_Touchdowns,GS)
 
 #update gamelogs and all other raw files by combining it with the prediction raw data files from last week
 
@@ -140,38 +141,38 @@ saveRDS(join_res[[8]],
         'model/data/touchdown_data_column_categories.rds')
 
 
-current_passing_data = readRDS('model/data/passing_preliminary_data.rds')
-last_week_passing_data = readRDS(paste0('model/prediction_results/passing/wk_',(this_week-1), '_prediction_df')) %>%
-  left_join(passing_results, join_by(player_id == player_id, Season == Season, Week == Week))
-current_passing_data = bind_rows(current_passing_data, last_week_passing_data)
-saveRDS(current_passing_data, '..model/data/passing_preliminary_data.rds')
-
-previous_preliminary_rushing_data = readRDS('model/data/rushing_preliminary_data.rds')
-last_week_preliminary_rushing_data = readRDS('model/prediction_results/prediction_rushing_preliminary_data.rds')
-
-last_week_rushing_predictions = readRDS(paste0('model/prediction_results/rushing/',this_season,'_wk',(this_week-1), '_prediction_df'))
-
-last_week_complete_rushing_data_model = list()
-for(p in 1:length(last_week_rushing_predictions))
-{
-  #make sure last week's prediction data only includes last week, not all weeks of season.
-  last_week_complete_rushing_data_model[[p]] = last_week_rushing_predictions[[p]] %>% left_join(rushing_results %>% select(-Season, -Week), join_by(player_id == player_id))
-}
+# current_passing_data = readRDS('model/data/passing_preliminary_data.rds')
+# last_week_passing_data = readRDS(paste0('model/prediction_results/passing/wk_',(this_week-1), '_prediction_df')) %>%
+#   left_join(passing_results, join_by(player_id == player_id, Season == Season, Week == Week))
+# current_passing_data = bind_rows(current_passing_data, last_week_passing_data)
+# saveRDS(current_passing_data, '..model/data/passing_preliminary_data.rds')
+# 
+# previous_preliminary_rushing_data = readRDS('model/data/rushing_preliminary_data.rds')
+# last_week_preliminary_rushing_data = readRDS('model/prediction_results/prediction_rushing_preliminary_data.rds')
+# 
+# last_week_rushing_predictions = readRDS(paste0('model/prediction_results/rushing/',this_season,'_wk',(this_week-1), '_prediction_df'))
+# 
+# last_week_complete_rushing_data_model = list()
+# for(p in 1:length(last_week_rushing_predictions))
+# {
+#   #make sure last week's prediction data only includes last week, not all weeks of season.
+#   last_week_complete_rushing_data_model[[p]] = last_week_rushing_predictions[[p]] %>% left_join(rushing_results %>% select(-Season, -Week), join_by(player_id == player_id))
+# }
   
-current_rushing_data = bind_rows(current_rushing_data, last_week_rushing_data)
-saveRDS(current_rushing_data, 'model/data/rushing_preliminary_data.rds')
-
-current_receiving_data = readRDS('model/data/receiving_preliminary_data.rds')
-last_week_receiving_data = readRDS(paste0('model/prediction_results/receiving/wk_',(this_week-1), '_prediction_df')) %>%
-  left_join(receiving_results, join_by(player_id == player_id, Season == Season, Week == Week))
-current_receiving_data = bind_rows(current_receiving_data, last_week_receiving_data)
-saveRDS(current_receiving_data, 'model/data/receiving_preliminary_data.rds')
-
-current_touchdown_data = readRDS('model/data/touchdown_preliminary_data.rds')
-last_week_touchdown_data = readRDS(paste0('model/prediction_results/touchdown/wk_',(this_week-1), '_prediction_df')) %>%
-  left_join(touchdown_results, join_by(player_id == player_id, Season == Season, Week == Week))
-current_touchdown_data = bind_rows(current_touchdown_data, last_week_touchdown_data)
-saveRDS(current_touchdown_data, 'model/data/touchdown_preliminary_data.rds')
+# current_rushing_data = bind_rows(current_rushing_data, last_week_rushing_data)
+# saveRDS(current_rushing_data, 'model/data/rushing_preliminary_data.rds')
+# 
+# current_receiving_data = readRDS('model/data/receiving_preliminary_data.rds')
+# last_week_receiving_data = readRDS(paste0('model/prediction_results/receiving/wk_',(this_week-1), '_prediction_df')) %>%
+#   left_join(receiving_results, join_by(player_id == player_id, Season == Season, Week == Week))
+# current_receiving_data = bind_rows(current_receiving_data, last_week_receiving_data)
+# saveRDS(current_receiving_data, 'model/data/receiving_preliminary_data.rds')
+# 
+# current_touchdown_data = readRDS('model/data/touchdown_preliminary_data.rds')
+# last_week_touchdown_data = readRDS(paste0('model/prediction_results/touchdown/wk_',(this_week-1), '_prediction_df')) %>%
+#   left_join(touchdown_results, join_by(player_id == player_id, Season == Season, Week == Week))
+# current_touchdown_data = bind_rows(current_touchdown_data, last_week_touchdown_data)
+# saveRDS(current_touchdown_data, 'model/data/touchdown_preliminary_data.rds')
 
 
 
