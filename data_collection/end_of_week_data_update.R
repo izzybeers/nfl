@@ -23,7 +23,7 @@ basic_cols = c('player_id', 'Name', 'names', 'Position', 'Month', 'Gtm', 'Week',
 missing_cutoff = 0.95
 
 this_season = 2025
-this_week = 5
+this_week = 6
 data_collection_min_year = this_season - 2 #need 2 years of historical data for feature engineering
 qb1_by_year = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vT9_LcNO2d8L5kzbJQZZti9kxfAZRFRAl2oJz5WlpusfvL1txbkc8OU6BSlB54TA9HCBHRlIxi9MpuT/pub?gid=1914165552&single=true&output=csv') %>%
   filter(Season == this_season)
@@ -38,10 +38,10 @@ player_gamelogs_results = get_player_gamelogs(year_cutoff = this_season, max_yea
                                               gamelog_html_table_tag, gamelog_html_playoff_table_tag, gamelog_advanced_html_rushing_table_tag, gamelog_advanced_html_passing_table_tag, gamelog_advanced_playoffs_html_passing_table_tag, gamelog_advanced_playoffs_html_rushing_table_tag,
                                               wk = this_week - 1, response_only = TRUE)
 
-missing_players = setdiff(player_gamelogs_results$player_id, past_week_gamelogs$player_id)
-missing_player_gamelogs_results = get_player_gamelogs(year_cutoff = this_season, max_year_cutoff = this_season, player_bios = player_bios[which(player_bios$max_year == this_season),] %>% filter(player_id %in% missing_players), basic_cols = basic_cols, missing_threshold = missing_cutoff,
-                                              gamelog_html_table_tag, gamelog_html_playoff_table_tag, gamelog_advanced_html_rushing_table_tag, gamelog_advanced_html_passing_table_tag, gamelog_advanced_playoffs_html_passing_table_tag, gamelog_advanced_playoffs_html_rushing_table_tag,
-                                              wk = this_week - 1, response_only = FALSE)
+# missing_players = setdiff(player_gamelogs_results$player_id, past_week_gamelogs$player_id)
+# missing_player_gamelogs_results = get_player_gamelogs(year_cutoff = this_season, max_year_cutoff = this_season, player_bios = player_bios[which(player_bios$max_year == this_season),] %>% filter(player_id %in% missing_players), basic_cols = basic_cols, missing_threshold = missing_cutoff,
+#                                               gamelog_html_table_tag, gamelog_html_playoff_table_tag, gamelog_advanced_html_rushing_table_tag, gamelog_advanced_html_passing_table_tag, gamelog_advanced_playoffs_html_passing_table_tag, gamelog_advanced_playoffs_html_rushing_table_tag,
+#                                               wk = this_week - 1, response_only = FALSE)
 
 passing_results = player_gamelogs_results %>% select(player_id, Season, Week, Passing_Yds,GS)
 rushing_results = player_gamelogs_results %>% select(player_id, Season, Week, Rushing_Yds,GS)
@@ -200,10 +200,11 @@ saveRDS(new_rushing_data, 'model/data/model_ready_rushing_train_df.rds')
 saveRDS(new_receiving_data, 'model/data/model_ready_receiving_train_df.rds')
 saveRDS(new_touchdown_data, 'model/data/model_ready_touchdown_train_df.rds')
 
-new_passing_data =  readRDS('model/data/model_ready_passing_train_df.rds')
-new_rushing_data = readRDS('model/data/model_ready_rushing_train_df.rds')
-new_receiving_data = readRDS('model/data/model_ready_receiving_train_df.rds')
-new_touchdown_data = readRDS('model/data/model_ready_touchdown_train_df.rds')
+#automatically read in when building model:
+# new_passing_data =  readRDS('model/data/model_ready_passing_train_df.rds')
+# new_rushing_data = readRDS('model/data/model_ready_rushing_train_df.rds')
+# new_receiving_data = readRDS('model/data/model_ready_receiving_train_df.rds')
+# new_touchdown_data = readRDS('model/data/model_ready_touchdown_train_df.rds')
 
 
 #train model
