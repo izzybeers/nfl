@@ -178,7 +178,7 @@ get_players_target_rankings = function(min_year, max_year, player_gamelogs, play
     return(list(rankings_receiving_all_years, rankings_rushing_all_years, seasonal_rushing_table_all_years, seasonal_receiving_table_all_years))
   }
   
-  all_stats_tables = future_map(.x = sort(unique(df$Team)),
+  all_stats_tables = future_map(.x = sort(unique(team_gamelogs$Team)),
                                   .f = get_rankings_for_team)
   rankings_by_slot = transpose(all_stats_tables)
   
