@@ -19,7 +19,7 @@ source('model/scripts/model_prep_script.R')
 source('data_collection/scripts/global.R')
 
 this_season = 2025
-this_week = 4
+this_week = 6
 data_collection_min_year = this_season - 2 #need 2 years of historical data for feature engineering
 
 qb1_by_year = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vT9_LcNO2d8L5kzbJQZZti9kxfAZRFRAl2oJz5WlpusfvL1txbkc8OU6BSlB54TA9HCBHRlIxi9MpuT/pub?gid=1914165552&single=true&output=csv') %>%
@@ -48,8 +48,6 @@ new_week_player_gamelogs_raw = get_player_gamelogs(year_cutoff = this_season, ma
                                                    gamelog_html_table_tag, gamelog_html_playoff_table_tag, gamelog_advanced_html_rushing_table_tag, gamelog_advanced_html_passing_table_tag, gamelog_advanced_playoffs_html_passing_table_tag, gamelog_advanced_playoffs_html_rushing_table_tag,
                                                    wk = this_week, response_only = FALSE, predict_mode = TRUE)
 
-
-
 #game start:
 page = get_html_content(url = 'https://www.rotowire.com/football/lineups.php')
 games = html_elements(page, ".lineups .lineup.is-nfl")
@@ -76,10 +74,18 @@ for (g in 1:length(games))
 }
 starter_table$match = 1
 
+bye_teams = setdiff(team_lookup_table$Team, starter_table$team)
+
 qb1_starting = qb1_by_year %>% left_join(starter_table %>% filter(positions == 'QB' & !(descriptor %in% c('I', 'D'))) %>% select(-positions), join_by('Team' == 'team', 'Qb1' == 'player')) %>% select(Team, match) %>%
    rename('Qb1_starting' = 'match') %>% mutate(Qb1_starting = ifelse(is.na(Qb1_starting), 0, Qb1_starting))
 
-new_week_player_gamelogs = new_week_player_gamelogs_raw %>% left_join(starter_table %>% filter(!(descriptor %in% c('I', 'D'))), join_by('Position' == 'positions', 'Name' == 'player', 'Team' == 'team')) %>%
+if(length(bye_teams) > 0)
+{
+  qb1_starting = qb1_starting %>% filter(!(Team %in% bye_teams))
+}
+
+new_week_player_gamelogs = new_week_player_gamelogs_raw %>%
+  left_join(starter_table %>% filter(!(descriptor %in% c('I', 'D'))), join_by('Position' == 'positions', 'Name' == 'player', 'Team' == 'team')) %>%
   mutate(GS = ifelse(is.na(match), 0, 1)) %>% select(-match, -descriptor)
 # new_week_player_gamelogs = new_week_player_gamelogs_raw %>% left_join(depth_charts_all_teams, join_by('Position' == 'Position', 'Name' == 'Player', 'Team' == 'Team')) %>%
 #   mutate(GS = ifelse(is.na(match), 0, 1))
@@ -88,6 +94,8 @@ old_cols = colnames(previous_gamelogs)
 missing_cols = setdiff(colnames(previous_gamelogs), colnames(new_week_player_gamelogs))
 new_week_player_gamelogs[,missing_cols] = NA
 player_gamelogs = bind_rows(previous_gamelogs, new_week_player_gamelogs)
+
+
 
 #we can use the existing table, season-end stats won't be calculated in the middle of the week:
 player_seasonal_stats = readRDS('data_collection/saved_data_files/player_end_of_season_summary_stats.rds')
@@ -116,6 +124,10 @@ new_player_rankings = list(player_rankings_this_week[[1]],
                            bind_rows(player_rankings_this_week[[5]]))
 
 
+#mid week run:
+new_player_rankings[[5]] = qb1_starting %>% mutate(Season = this_season, Week = this_week) %>% select(Season, Week, Team, Qb1_starting)
+
+
 
 #fields related to weather, stadium, location, date:
 
@@ -138,7 +150,13 @@ if(nrow(playoff_clinching_data_this_week) == 1) #just one NA row with no team
 
 #fields related to player injury status:
 
-injuries_data_this_week = get_injuries_data(min_year = this_season, max_year = this_season, wk = this_week)
+injuries_data_this_week = tryCatch({
+  get_injuries_data(min_year = this_season, max_year = this_season, wk = this_week)
+  },
+    error = function(e) {
+      get_injuries_data(min_year = this_season, max_year = this_season, wk = this_week)
+    }
+)
 # partial_injuries_data = readRDS('data_collection/saved_data_files/injuries_data.rds') %>% filter(!(Season == this_season & Week >= this_week))
 # injuries_data = bind_rows(partial_injuries_data, injuries_data_this_week)
 # saveRDS(injuries_data, 'data_collection/saved_data_files/injuries_data.rds')
@@ -350,13 +368,18 @@ for(m in 1:length(model_names))
 
 #updates throughout the week for player gamelogs (starters), weather, and injuries:
 existing_current_week_gamelogs = readRDS(paste0('model/prediction_results/raw_data/',this_season,'_wk', this_week, '_player_gamelogs_df.rds')) %>% filter(!(player_id %in% new_week_player_gamelogs$player_id) | Date < Sys.time())
-saveRDS(rbind(existing_current_week_gamelogs, new_week_player_gamelogs %>% filter(Date >= Sys.time())), paste0('model/prediction_results/raw_data/',this_season,'_wk', this_week, '_player_gamelogs_df'))
+saveRDS(rbind(existing_current_week_gamelogs, new_week_player_gamelogs %>% filter(Date >= Sys.time())), paste0('model/prediction_results/raw_data/',this_season,'_wk', this_week, '_player_gamelogs_df.rds'))
 
 existing_current_weather_data = readRDS(paste0('model/prediction_results/raw_data/',this_season,'_wk', this_week, '_weather_stadium_df.rds')) %>% filter(!(Team %in% weather_and_stadium_data_this_week$Team))
-saveRDS(rbind(existing_current_weather_data, weather_and_stadium_data_this_week), paste0('model/prediction_results/raw_data/',this_season,'_wk', this_week, '_weather_stadium_df'))
+saveRDS(rbind(existing_current_weather_data, weather_and_stadium_data_this_week), paste0('model/prediction_results/raw_data/',this_season,'_wk', this_week, '_weather_stadium_df.rds'))
+
+target_rankings_data_to_write = readRDS(paste0('model/prediction_results/raw_data/',this_season,'_wk', this_week, '_target_rankings_df.rds'))
+target_rankings_data_to_write[[5]] = rbind(target_rankings_data_to_write[[5]] %>% filter(!(Team %in% new_player_rankings[[5]]$Team)),
+                                           new_player_rankings[[5]])
+saveRDS(target_rankings_data_to_write, paste0('model/prediction_results/raw_data/',this_season,'_wk', this_week, '_target_rankings_df.rds'))
 
 existing_injuries_data = readRDS(paste0('model/prediction_results/raw_data/',this_season,'_wk', this_week, '_injuries_df.rds')) %>% filter(!(Player %in% injuries_data_this_week$Player))
-saveRDS(rbind(existing_injuries_data, injuries_data_this_week), paste0('model/prediction_results/raw_data/',this_season,'_wk', this_week, '_injuries_df'))
+saveRDS(rbind(existing_injuries_data, injuries_data_this_week), paste0('model/prediction_results/raw_data/',this_season,'_wk', this_week, '_injuries_df.rds'))
 
 existing_passing_preliminary_data = readRDS(paste0('model/prediction_results/passing/',this_season,'_wk', this_week, '_prediction_passing_preliminary_data.rds')) %>% filter(!(player_id %in% join_res[[1]]$player_id) | as.POSIXct(paste(Date, as.integer(Season) + ifelse(grepl("^(January|February)\\b", Date), 1L, 0L), Time), format = "%B %e %Y %I:%M%p", tz = "America/New_York") < Sys.time())
 saveRDS(rbind(existing_passing_preliminary_data, join_res[[1]] %>% filter(as.POSIXct(paste(Date, as.integer(Season) + ifelse(grepl("^(January|February)\\b", Date), 1L, 0L), Time), format = "%B %e %Y %I:%M%p", tz = "America/New_York") >= Sys.time())), paste0('model/prediction_results/passing/',this_season,'_wk', this_week, '_prediction_passing_preliminary_data.rds'))

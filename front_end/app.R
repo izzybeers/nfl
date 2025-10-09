@@ -153,8 +153,9 @@ join_preds_and_props = function(preds, props)
     mutate(Betting_Line_Implied_Prob = ifelse(as.numeric(Odds) < 0, (-1)*as.numeric(Odds) / ((-1)*as.numeric(Odds) + 100), 100 / (as.numeric(Odds) + 100)),
            Timeslot = paste(Day, Time_of_Day)) %>%
     rename('Player' = 'names') %>%
-    # filter(as.POSIXct(paste0(Date, ", ", Season, " ", Time),format = "%B %d, %Y %I:%M %p",tz = "America/New_York") > Sys.time()) %>%
-    select(Player, Position, Starting, Type, label, Team, Opp, Timeslot, Odds, Model_Probability, Betting_Line_Implied_Prob, Expected_Accuracy, profit_per_100)
+    filter(as.POSIXct(paste0(Date, ", ", Season, " ", Time),format = "%B %d, %Y %I:%M %p",tz = "America/New_York") > Sys.time() + 3600) %>%
+    mutate(posix_timestamp = as.POSIXct(paste0(Date, ", ", Season, " ", Time),format = "%B %d, %Y %I:%M %p",tz = "America/New_York")) %>%
+    select(Player, Position, Starting, Type, label, Team, Opp, Date, Time, posix_timestamp, Timeslot, Odds, Model_Probability, Betting_Line_Implied_Prob, Expected_Accuracy, profit_per_100)
   return(joined)
 }
 
@@ -469,18 +470,19 @@ ui <- fluidPage(
                  uiOutput("log_portfolio_optimization_bet") %>% withSpinner()
                ),
                mainPanel(
-                 width = 8,
-                 uiOutput("error_message"),
-                 div(style = 'font-weight: bold; font-size: 16px;', textOutput("header")),
-                 textOutput("header2"),
-                 tags$br(),
-                 # uiOutput("bet_size_ui"),
-                 fluidRow(
-                   column(3, uiOutput("type_filter_ui")),
-                   column(3, uiOutput("timeslot_filter_ui")),
-                   column(3, uiOutput("team_filter_ui")),
-                   column(3, uiOutput("model_accuracy_ui"))
-                   ),
+                   width = 8,
+                   uiOutput("error_message"),
+                   div(style = 'font-weight: bold; font-size: 16px;', textOutput("header")),
+                   textOutput("header2"),
+                   tags$br(),
+                   # uiOutput("bet_size_ui"),
+                   fluidRow(
+                     column(3, uiOutput("type_filter_ui")),
+                     column(3, uiOutput("timeslot_filter_ui")),
+                     column(3, uiOutput("team_filter_ui")),
+                     column(3, uiOutput("model_accuracy_ui")),
+                     ),
+                   uiOutput("model_probability_slider_ui"),
                    tags$br(),
                    uiOutput("refresh"),
                    div(id = 'refresh_message', textOutput("refreshing_message")),
@@ -611,6 +613,11 @@ server <- function(input, output, session) {
     pickerInput(inputId = 'model_accuracy_filter', label = 'Filter on Expected Model Accuracy', choices = unique(results()$Expected_Accuracy), multiple = TRUE)
   })
   
+  output$model_probability_slider_ui = renderUI({
+    req(results())
+    sliderInput(inputId = 'model_probability_slider', label = 'Range of model probabilities to consider', min = 0, max = 100, value = c(0,100), step = 2, round = TRUE, animate = TRUE, width = '100%')
+  })
+  
   output$weather_warning = renderText({
     req(results())
     ifelse(any(difftime(as.POSIXct(paste0(predictions$Date, ", ", predictions$Season, " ", predictions$Time),format = "%B %d, %Y %I:%M %p",tz = "America/New_York"), predictions$updateTime, units = 'hours') > 47),
@@ -641,6 +648,10 @@ server <- function(input, output, session) {
     {
       res = res %>% filter(Expected_Accuracy %in% input$model_accuracy_filter)
     }
+    if(!is.null(input$model_probability_slider))
+    {
+      res = res %>% filter(Model_Probability >= input$model_probability_slider[1]/100 & Model_Probability <= input$model_probability_slider[2]/100)
+    }
     res %>% mutate(Return = ((Model_Probability*profit_per_100 - 100*(1-Model_Probability)))/100,
                    Risk_Raw = Model_Probability*(1 - Model_Probability)*(profit_per_100/100 + 1)^2,
                    ratio_risk = case_when(Expected_Accuracy == 'High' ~ 1,
@@ -662,18 +673,20 @@ server <- function(input, output, session) {
       mutate(Return = round(Return*100,2), Risk_Score = round(Risk_Score, 2)) %>%
       rename('expected_return_profit_per_100' = 'Return') %>% 
       arrange(desc(expected_return_profit_per_100)) %>%
-      mutate(Model_Probability = paste0(100*round(Model_Probability,2), '%'),
-             Betting_Line_Implied_Prob = paste0(100*round(Betting_Line_Implied_Prob, 2), '%')) %>%
       select(-profit_per_100,-ratio_risk, -Risk_Raw) %>%
       mutate(run_time = format(force_tz(Sys.time(), "America/New_York"), "%Y-%m-%d %I:%M %p"))
+      
     
     if(difftime(Sys.time(), most_recent_save, units = 'hours') > 1)
     {
-      sheet_append(ss = sheet_id, data = results, sheet = 'bet_recommendations')
+      sheet_append(ss = sheet_id, data = results %>% mutate(Week = latest_week, Season = latest_season) %>% select(Season, Week, everything()), sheet = 'bet_recommendations')
     }
     
     shinyjs::hide("refresh_message")
-    results %>% select(-run_time) #run time was just for writing to the csv 
+
+    results %>% select(-run_time, -Time, -Date, -posix_timestamp)  %>%
+        datatable() %>%
+      formatPercentage(c('Model_Probability', 'Betting_Line_Implied_Prob'), digits = 1) #run time was just for writing to the csv 
   })
   
   observeEvent(input$click, {
@@ -752,7 +765,11 @@ server <- function(input, output, session) {
       Odds = input$bet_odds %>% as.character(),
       Amount = input$bet_amt,
       Time_Submitted = format(force_tz(Sys.time(), "America/New_York"), "%Y-%m-%d %I:%M %p"),
-      Type = 'Individual Bet'
+      Type = 'Individual Bet',
+      Team = results() %>% filter(clean_names(Player) == clean_names(input$click$name)) %>% select(Team) %>% distinct() %>% pull(),
+      Opp = results() %>% filter(clean_names(Player) == clean_names(input$click$name)) %>% select(Opp) %>% distinct() %>% pull(),
+      Gametime = results() %>% filter(clean_names(Player) == clean_names(input$click$name)) %>% select(posix_timestamp) %>% distinct() %>% pull(),
+      Timeslot =  results() %>% filter(clean_names(Player) == clean_names(input$click$name)) %>% select(Timeslot) %>% distinct() %>% pull()
       )
     
     print(row_to_write)
@@ -855,6 +872,7 @@ server <- function(input, output, session) {
     tagList(h1('Optimize Portfolio of Bets'),
               p('Be sure the bet recommendation table to the right has all your desired filters applied.'),
             p('The optimizer takes into account expected returns, risk (based on how long-shot the odds are), model expected accuracy, and correlations between bets. It only considers bets from High and Medium accuracy models.'),
+            p('Due to DraftKings minimum bet requirement, bet recommendations for less than $0.10 will automatically be removed, and the remaining recommendations re-calculated. This would give you less bets than you requested.'),
             p('When the bet portfolio list populates, click on a bet for more information.')
     )
   })
@@ -1160,7 +1178,12 @@ server <- function(input, output, session) {
    res = optimal_portfolio()[[1]] %>%
      mutate(BetAmount = BetWeight*input$optimization_bet_amt,
             ToPay = ifelse(as.numeric(Odds) < 0, BetAmount + BetAmount*(100/abs(as.numeric(Odds))), BetAmount + BetAmount*(as.numeric(Odds)/100))) %>%
-     select(-BetWeight) 
+     select(-BetWeight) %>%
+     filter(BetAmount > 0.1)
+   total_bet_amount = sum(res$BetAmount) #in case it got smaller when we tookout BetAmount < 0.1
+   res$BetAmount = 50*(res$BetAmount/total_bet_amount)
+   
+   
    
    tryCatch({
      sheet_append(ss = sheet_id, data = res %>%
@@ -1326,9 +1349,12 @@ server <- function(input, output, session) {
         Odds = bet_odds,
         Amount = bet_amounts,
         Time_Submitted = Sys.time() %>% format('%Y-%m-%d %I:%M %p'),
-        Type = 'Optimization Recommender'
-      ) %>% data.frame()
-      
+        Type = 'Optimization Recommender') %>%
+        data.frame() %>%
+        mutate(clean_name = clean_names(Player)) %>%
+        inner_join(results() %>% mutate(clean_name = clean_names(Player)) %>% select(clean_name, Team, Opp, posix_timestamp, Timeslot) %>% distinct(), join_by ('clean_name')) %>%
+        distinct()%>%
+        select(-clean_name)
       
       tryCatch({
         sheet_append(ss = sheet_id, data = updated, sheet = 'bets_placed')
