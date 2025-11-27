@@ -34,12 +34,14 @@ get_players_target_rankings = function(min_year, max_year, player_gamelogs, play
 
   get_rankings_for_team = function(t)
   {
+    print(t)
     rankings_receiving_all_years = data.frame(rbind())
     rankings_rushing_all_years = data.frame(rbind())
     seasonal_rushing_table_all_years = data.frame(rbind())
     seasonal_receiving_table_all_years = data.frame(rbind())
     for (y in sort(unique(df$Season)))
     {
+      print(y)
       this_team_gamelog = team_gamelogs %>% filter(Team == t & Season == y)
       
       #weekly gamelogs:
@@ -180,6 +182,20 @@ get_players_target_rankings = function(min_year, max_year, player_gamelogs, play
   
   all_stats_tables = future_map(.x = sort(unique(team_gamelogs$Team)),
                                   .f = get_rankings_for_team)
+  
+  rankings_receiving = data.frame(rbind())
+  rankings_rushing = data.frame(rbind())
+  seasonal_rushing_table = data.frame(rbind())
+  seasonal_receiving_table = data.frame(rbind())
+  
+  for(t in sort(unique(team_gamelogs$Team)))
+  {
+    res = get_rankings_for_team(t)
+    rankings_receiving = data.frame(rbind(rankings_receiving, res[[1]]))
+    rankings_rushing = data.frame(rbind(rankings_rushing, res[[2]]))
+    seasonal_rushing_table = data.frame(rbind(seasonal_rushing_table, res[[3]]))
+    seasonal_receiving_table = data.frame(rbind(seasonal_receiving_table, res[[4]]))
+  }
   rankings_by_slot = transpose(all_stats_tables)
   
   rankings_receiving = bind_rows(rankings_by_slot[[1]])
