@@ -30,7 +30,8 @@ team_lookup_table = read.csv('https://docs.google.com/spreadsheets/d/1DSSz4X-3LL
 
 min_return_portfolio_optimization = 0.5
 correlations = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vT9_LcNO2d8L5kzbJQZZti9kxfAZRFRAl2oJz5WlpusfvL1txbkc8OU6BSlB54TA9HCBHRlIxi9MpuT/pub?gid=956130726&single=true&output=csv')
-depth_charts = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vTyIaWWovW2YUP1-JxYpg9ZHpF7a2i_7AEVan5ptaBBiwj6gwYp0STpE8HvYILR190HTrOFt2GMyUqn/pub?gid=594515538&single=true&output=csv')
+depth_charts = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vTyIaWWovW2YUP1-JxYpg9ZHpF7a2i_7AEVan5ptaBBiwj6gwYp0STpE8HvYILR190HTrOFt2GMyUqn/pub?gid=594515538&single=true&output=csv') %>%
+  group_by(player_id) %>% arrange(desc(updated)) %>% slice(1) %>% ungroup()
 
 
 extra_passing_info = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vTyIaWWovW2YUP1-JxYpg9ZHpF7a2i_7AEVan5ptaBBiwj6gwYp0STpE8HvYILR190HTrOFt2GMyUqn/pub?gid=1528317693&single=true&output=csv')
