@@ -13,10 +13,8 @@ library(lubridate)
 library(quadprog)
 library(stringr)
 library(Matrix)
+library(tidyr)
 gs4_auth(cache = ".secrets", email = "izzyb961@gmail.com")
-
-# setwd("~/nfl")
-# source('data_collection/scripts/global.R')
 
 
 sheet_id = '19sWOOPFI37WaR5lmlYS6UUrV-0dmTn0iTFqUp26sfGI'
@@ -31,17 +29,9 @@ gid_bet_results = '1472501972'
 team_lookup_table = read.csv('https://docs.google.com/spreadsheets/d/1DSSz4X-3LLAarRlBRtuMsGJ1hh2FDdVeHJZFdpZGW0A/export?format=csv&gid=0')
 
 min_return_portfolio_optimization = 0.5
-
 correlations = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vT9_LcNO2d8L5kzbJQZZti9kxfAZRFRAl2oJz5WlpusfvL1txbkc8OU6BSlB54TA9HCBHRlIxi9MpuT/pub?gid=956130726&single=true&output=csv')
-previous_recs = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vTyIaWWovW2YUP1-JxYpg9ZHpF7a2i_7AEVan5ptaBBiwj6gwYp0STpE8HvYILR190HTrOFt2GMyUqn/pub?gid=277208139&single=true&output=csv')
-depth_charts = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vTyIaWWovW2YUP1-JxYpg9ZHpF7a2i_7AEVan5ptaBBiwj6gwYp0STpE8HvYILR190HTrOFt2GMyUqn/pub?gid=594515538&single=true&output=csv') %>% select(player_id, Depth)
+depth_charts = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vTyIaWWovW2YUP1-JxYpg9ZHpF7a2i_7AEVan5ptaBBiwj6gwYp0STpE8HvYILR190HTrOFt2GMyUqn/pub?gid=594515538&single=true&output=csv')
 
-if(!is.null(previous_recs) && nrow(previous_recs) > 0)
-{
-  most_recent_save = max(as.POSIXct(previous_recs$run_time,format = "%Y-%m-%d %I:%M %p"))
-} else {
-  most_recent_save = NULL
-}
 
 extra_passing_info = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vTyIaWWovW2YUP1-JxYpg9ZHpF7a2i_7AEVan5ptaBBiwj6gwYp0STpE8HvYILR190HTrOFt2GMyUqn/pub?gid=1528317693&single=true&output=csv')
 extra_rushing_info = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vTyIaWWovW2YUP1-JxYpg9ZHpF7a2i_7AEVan5ptaBBiwj6gwYp0STpE8HvYILR190HTrOFt2GMyUqn/pub?gid=1396923583&single=true&output=csv')
@@ -105,7 +95,6 @@ pull_prediction_data = function(index, gids, responses)
 
 
 get_props <- function(bet_category) {
-  # URL for NFL event group (replace "88808" if the event group ID changes)
   bet_id = case_when(
     bet_category == 'Receiving' ~ '16570',
     bet_category == 'Rushing' ~ '16571',
@@ -153,7 +142,7 @@ join_preds_and_props = function(preds, props)
     mutate(Betting_Line_Implied_Prob = ifelse(as.numeric(Odds) < 0, (-1)*as.numeric(Odds) / ((-1)*as.numeric(Odds) + 100), 100 / (as.numeric(Odds) + 100)),
            Timeslot = paste(Day, Time_of_Day)) %>%
     rename('Player' = 'names') %>%
-    filter(as.POSIXct(paste0(Date, ", ", Season, " ", Time),format = "%B %d, %Y %I:%M %p",tz = "America/New_York") > Sys.time() + 3600) %>%
+    filter(as.POSIXct(paste0(Date, ", ", Season, " ", Time),format = "%B %d, %Y %I:%M %p",tz = "America/New_York") > Sys.time() - 3600) %>%
     mutate(posix_timestamp = as.POSIXct(paste0(Date, ", ", Season, " ", Time),format = "%B %d, %Y %I:%M %p",tz = "America/New_York")) %>%
     select(Player, Position, Starting, Type, label, Team, Opp, Date, Time, posix_timestamp, Timeslot, Odds, Model_Probability, Betting_Line_Implied_Prob, Expected_Accuracy, profit_per_100)
   return(joined)
@@ -459,11 +448,16 @@ ui <- fluidPage(
                  uiOutput("remove_players_ui"),
                  uiOutput("portfolio_optimization_button_ui"),
                  textOutput("no_bets"),
-                 uiOutput("riskier_alternative_ui"),
-                 dataTableOutput("portfolio_optimization_output"),
+                 # uiOutput("riskier_alternative_ui"),
+                 uiOutput("bet_risk_selector_ui"),
                  tags$br(),
+                 uiOutput("help_understand_metrics_button_ui"),
                  uiOutput("portfolio_return"),
                  uiOutput("portfolio_risk"),
+                 uiOutput("portfolio_sharpe"),
+                 tags$br(),
+                 dataTableOutput("portfolio_optimization_output"),
+                 tags$br(),
                  tags$br(),
                  uiOutput("optimization_instructions"),
                  tags$br(),
@@ -504,6 +498,29 @@ ui <- fluidPage(
              uiOutput("bet_radio_options") %>% withSpinner(),
              tags$br(),
              uiOutput("save_button")
+    ),
+    tabPanel('Upcoming Cheat Sheets',
+             uiOutput("bettor_choice_ui"),
+             uiOutput("survivor_teams_ui"),
+             uiOutput("cheat_sheet_button_ui")
+             ),
+    tabPanel('Bettor Summaries',
+             uiOutput("choose_bettor_summary_ui"),
+             uiOutput("summary_only_finished"),
+             tags$br(),
+             dataTableOutput("bet_overall_summaries"),
+             tags$br(),
+             dataTableOutput("bet_summary_by_week"),
+             tags$br(),
+             dataTableOutput("bet_summary_by_week_reorganized"),
+             tags$br(),
+             dataTableOutput("bet_summary_by_type"),
+             tags$br(),
+             dataTableOutput("bet_summary_by_portfolio_type"),
+             tags$br(),
+             dataTableOutput("bet_summary_by_odds_range"),
+             tags$br(),
+             tags$br()
     )
   )
 )
@@ -514,9 +531,18 @@ server <- function(input, output, session) {
   gids = c(passing_gid, rushing_gid, receiving_gid, touchdown_gid)
   responses = list(passing_response, rushing_response, receiving_response, touchdown_response)
   
-  predictions = future_map(.x = 1:length(gids), #index, for parallel processing
-                           .f = pull_prediction_data,
-                           gids = gids, responses = responses) %>%
+  previous_recs = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vTyIaWWovW2YUP1-JxYpg9ZHpF7a2i_7AEVan5ptaBBiwj6gwYp0STpE8HvYILR190HTrOFt2GMyUqn/pub?gid=277208139&single=true&output=csv')
+  if(!is.null(previous_recs) && nrow(previous_recs) > 0)
+  {
+    most_recent_save = max(as.POSIXct(previous_recs$run_time,format = "%Y-%m-%d %I:%M %p"))
+  } else {
+    most_recent_save = NULL
+  }
+  
+  predictions = lapply(1:length(gids),
+                        pull_prediction_data,
+                        gids = gids,
+                        responses = responses) %>%
     bind_rows()
   
   print(predictions)
@@ -526,15 +552,15 @@ server <- function(input, output, session) {
   latest_week = max(predictions$Week)
   latest_update_time = max(predictions$updateTime) %>% format("%Y-%m-%d %I:%M %p", tz = "America/New_York")
 
-  extra_passing_info = extra_passing_info %>% filter(Week == latest_week) %>% left_join(depth_charts, join_by('player_id'))
-  extra_rushing_info = extra_rushing_info %>% filter(Week == latest_week) %>% left_join(depth_charts, join_by('player_id'))
-  extra_receiving_info = extra_receiving_info %>% filter(Week == latest_week) %>% left_join(depth_charts, join_by('player_id'))
-  extra_touchdown_info = extra_touchdown_info %>% filter(Week == latest_week) %>% left_join(depth_charts, join_by('player_id'))
+  extra_passing_info = extra_passing_info %>% filter(Week == latest_week) %>% left_join(depth_charts %>% select(player_id, Depth), join_by('player_id'))
+  extra_rushing_info = extra_rushing_info %>% filter(Week == latest_week) %>% left_join(depth_charts %>% select(player_id, Depth), join_by('player_id'))
+  extra_receiving_info = extra_receiving_info %>% filter(Week == latest_week) %>% left_join(depth_charts %>% select(player_id, Depth), join_by('player_id'))
+  extra_touchdown_info = extra_touchdown_info %>% filter(Week == latest_week) %>% left_join(depth_charts %>% select(player_id, Depth), join_by('player_id'))
   
   predictions = predictions %>% filter(Week == latest_week)
   
-  props_initial = future_map(.x = c('Passing', 'Rushing', 'Receiving', 'Touchdown'),
-                     .f = get_props) %>%
+  props_initial = lapply(c('Passing', 'Rushing', 'Receiving', 'Touchdown'),
+                         get_props) %>%
     bind_rows()
   props_initial$name = gsub('\\(.*\\)', '', props_initial$name) %>% trimws()
   
@@ -610,7 +636,7 @@ server <- function(input, output, session) {
   })
   output$model_accuracy_ui = renderUI({
     req(results())
-    pickerInput(inputId = 'model_accuracy_filter', label = 'Filter on Expected Model Accuracy', choices = unique(results()$Expected_Accuracy), multiple = TRUE)
+    pickerInput(inputId = 'model_accuracy_filter', label = 'Filter on Expected Model Accuracy', choices = unique(results()$Expected_Accuracy), selected = c('High', 'Medium'), multiple = TRUE)
   })
   
   output$model_probability_slider_ui = renderUI({
@@ -677,7 +703,7 @@ server <- function(input, output, session) {
       mutate(run_time = format(force_tz(Sys.time(), "America/New_York"), "%Y-%m-%d %I:%M %p"))
       
     
-    if(difftime(Sys.time(), most_recent_save, units = 'hours') > 1)
+    if(is.null(most_recent_save) || difftime(Sys.time(), most_recent_save, units = 'hours') > 1)
     {
       sheet_append(ss = sheet_id, data = results %>% mutate(Week = latest_week, Season = latest_season) %>% select(Season, Week, everything()), sheet = 'bet_recommendations')
     }
@@ -878,7 +904,7 @@ server <- function(input, output, session) {
   })
   output$max_bets_slider_ui = renderUI({
     req(results())
-    sliderInput(inputId = 'max_bets', label = "Max # of Bets", value = 5, min = 1, max = 10)
+    sliderInput(inputId = 'max_bets', label = "Max # of Bets", value = 5, min = 1, max = 20)
   })
   
   output$odds_range_slider_ui = renderUI({
@@ -959,7 +985,7 @@ server <- function(input, output, session) {
     radioButtons(inputId = 'riskier', label = '', choices = c('Default Portfolio' = 0, 'Riskier Alternative (if available)' = 1), selected = 0, inline = TRUE)
   })
   
-  both_portfolios = reactive({
+  all_portfolios = reactive({
     req(portfolio_res_ready_to_run())
     req(!is.null(input$optimization_bet_amt) && input$optimization_bet_amt > 0)
     positive_returns = results_filtered() %>%
@@ -1049,7 +1075,7 @@ server <- function(input, output, session) {
         return(new_w)
       }
       
-      gammas = 10^seq(-3, 3, length.out = 31)
+      gammas = 10^seq(-3, 3, length.out = 100)
       n = length(mu)
       if (n == 1) {
         w = 1
@@ -1064,85 +1090,81 @@ server <- function(input, output, session) {
       sd_vec     <- rep(NA, length(gammas))
       sharpe_vec <- rep(NA, length(gammas))
       
-      # sharpe = 0 #initialize
-      # second_best_sharpe = -1
-      # best_weights = NA
+      full_weights_list = vector("list", length(weights))
       for(w in 1:length(weights))
       {
         these_weights = unlist(weights[[w]])
-        if(!is.na(these_weights))
+        if(all(!is.na(these_weights)))
         {
           mu_portfolio <- sum(these_weights * mu[names(these_weights)])
-          sd_portfolio <- sqrt(as.numeric(t(these_weights) %*% Sigma[names(these_weights), names(these_weights)] %*% these_weights))
+          var_portfolio <- as.numeric(t(these_weights) %*% Sigma[names(these_weights), names(these_weights)] %*% these_weights)
+          sd_portfolio = sqrt(var_portfolio)
           
           # new_sharpe <- ifelse(sd_portfolio > 0, mu_portfolio / sd_portfolio, NA)
           sharpe_val    = ifelse(sd_portfolio > 0, mu_portfolio / sd_portfolio, NA)
           mu_vec[w]     = mu_portfolio
           sd_vec[w]     = sd_portfolio
           sharpe_vec[w] = sharpe_val
+          
+          df = these_weights %>% data.frame()
+          indx = which(colnames(cov_matrix) %in% rownames(df))
+          
+          bet_rows = positive_returns[indx,]
+          
+          players = gsub('Anytime TD Scorer|Rushing[0-9]+\\+|Receiving[0-9]+\\+|Passing[0-9]+\\+', '', rownames(df)) %>% trimws()
+          types = sapply(rownames(df), function(x) str_extract(x, 'Passing|Rushing|Receiving|Anytime TD Scorer')) %>% as.character()
+          labels = sapply(rownames(df), function(x) str_extract(x, '[0-9]+\\+|Anytime TD Scorer')) %>% as.character()
+          labels_df = data.frame(players, types, labels)
+          colnames(labels_df) = c('Player', 'Type', 'label')
+          from_bets_table = labels_df %>% inner_join(bet_rows, join_by(Player, Type, label))
+          df = cbind(df, from_bets_table$Odds)
+          colnames(df) = c('BetWeight', 'Odds')
+          
+          full_weights_list[[w]] = list(
+            weights = df,              
+            mu      = mu_portfolio,
+            var     = var_portfolio,
+            sd      = sd_portfolio,
+            sharpe  = sharpe_val
+          )
         }
       }
       best_indx = which.max(sharpe_vec)
-      best_weights = unlist(weights[[best_indx]])
-      sel = names(best_weights)
-      # sel = names(best_weights)
-      mu_port  = sum(best_weights * mu[sel])
       
-      var_port  = as.numeric(t(best_weights) %*% Sigma[sel, sel] %*% best_weights)
-      risk_port = sqrt(var_port)
-      
-      if(risk_port < mean(sd_vec[is.finite(sd_vec)], na.rm = TRUE)) #the best portfolio has below-average risk
-      {
-        finite = which(is.finite(sd_vec))  #finite is non-NA values
-        avg_risk_indx = which.min(abs(sd_vec[finite] - mean(sd_vec)))
-        avg_risk_weights = unlist(weights[[avg_risk_indx]])
-        avg_risk_sel = names(avg_risk_weights)
-        avg_risk_mu_port  = sum(avg_risk_weights * mu[avg_risk_sel])
-        avg_risk_var_port  = as.numeric(t(avg_risk_weights) %*% Sigma[avg_risk_sel, avg_risk_sel] %*% avg_risk_weights)
-        avg_risk_risk_port = sqrt(avg_risk_var_port)
-      } else {#if the portfolio has above average risk, then don't recommend a riskier alternative
-        avg_risk_indx = best_indx
-        avg_risk_weights = best_weights
-        avg_risk_sel = sel
-        avg_risk_mu_port = mu_port
-        avg_risk_risk_port = risk_port
-      }
-      df = best_weights %>% data.frame()
-      df_alt = avg_risk_weights %>% data.frame()
-      indx = which(colnames(cov_matrix) %in% rownames(df))
-      indx_alt = which(colnames(cov_matrix) %in% rownames(df_alt))
-      
-      bet_rows = positive_returns[indx,]
-      bet_rows_alt = positive_returns[indx_alt,]
-      
-      players = gsub('Anytime TD Scorer|Rushing[0-9]+\\+|Receiving[0-9]+\\+|Passing[0-9]+\\+', '', rownames(df)) %>% trimws()
-      players_alt = gsub('Anytime TD Scorer|Rushing[0-9]+\\+|Receiving[0-9]+\\+|Passing[0-9]+\\+', '', rownames(df_alt)) %>% trimws()
-      
-      types = sapply(rownames(df), function(x) str_extract(x, 'Passing|Rushing|Receiving|Anytime TD Scorer')) %>% as.character()
-      types_alt = sapply(rownames(df_alt), function(x) str_extract(x, 'Passing|Rushing|Receiving|Anytime TD Scorer')) %>% as.character()
-      
-      labels = sapply(rownames(df), function(x) str_extract(x, '[0-9]+\\+|Anytime TD Scorer')) %>% as.character()
-      labels_alt = sapply(rownames(df_alt), function(x) str_extract(x, '[0-9]+\\+|Anytime TD Scorer')) %>% as.character()
-      
-      labels_df = data.frame(players, types, labels)
-      labels_df_alt = data.frame(players_alt, types_alt, labels_alt)
-      
-      colnames(labels_df) = c('Player', 'Type', 'label')
-      colnames(labels_df_alt) = c('Player', 'Type', 'label')
-      
-      from_bets_table = labels_df %>% inner_join(bet_rows, join_by(Player, Type, label))
-      from_bets_table_alt = labels_df_alt %>% inner_join(bet_rows_alt, join_by(Player, Type, label))
-      
-      df = cbind(df, from_bets_table$Odds)
-      df_alt = cbind(df_alt, from_bets_table_alt$Odds)
-      
-      colnames(df) = c('BetWeight', 'Odds')
-      colnames(df_alt) = c('BetWeight', 'Odds')
       portfolio_res_ready_to_show(TRUE) #ready to show, no longer waiting on update
       
+      portfolio_df_to_write = lapply(1:length(full_weights_list), function(i) {
+        this_portfolio = full_weights_list[[i]]
+        weights_table = this_portfolio$weights %>% mutate(
+          Season = latest_season,
+          Week = latest_week,
+          Bet = rownames(this_portfolio$weights),
+          num_bets = nrow(this_portfolio$weights),
+          gamma = gammas[i],
+          mu = this_portfolio$mu,
+          var = this_portfolio$var,
+          sd = this_portfolio$sd,
+          sharpe = this_portfolio$sharpe,
+          portfolio_id = as.character(sample(1:10000000, 1)),
+          updateTime = format(lubridate::with_tz(Sys.time(), "America/New_York"),
+                              "%Y-%m-%d %I:%M %p")
+        ) %>% select(Season, Week, portfolio_id, num_bets, Bet, everything())
+      }) %>% bind_rows()
+      rownames(portfolio_df_to_write) = NULL
       
-      return(list('default' = list(df, mu_port, risk_port),
-                  'riskier' = list(df_alt, avg_risk_mu_port, avg_risk_risk_port)))
+      tryCatch({
+        sheet_append(ss = sheet_id, data = portfolio_df_to_write,
+                     sheet = 'portfolio_bet_recommendations')
+        showNotification("✅  Successfully Updated", type = "message", duration = 5)
+      }, error = function(e) {
+        showNotification(paste0("❌ Failed to write: ", e$message), type = "error", duration = 7)
+      })
+      
+      
+      return(list(full_weights_list, best_indx))
+      
+      # return(list('default' = list(df, mu_port, risk_port),
+      #             'riskier' = list(df_alt, avg_risk_mu_port, avg_risk_risk_port)))
     } else {
       portfolio_res_ready_to_show(FALSE)
       return(NULL)
@@ -1151,81 +1173,185 @@ server <- function(input, output, session) {
   
   output$no_bets = renderText({
     req(portfolio_res_ready_to_run())
-    if(is.null(both_portfolios()))
+    if(is.null(all_portfolios())[[1]])
     {
       "No recommended bets available. Check your selections and try again."
     }
   })
     
-  optimal_portfolio = reactive({
-    req(both_portfolios())
-    req(!is.na(both_portfolios()))
-                                 
-    if(is.null(input$riskier) || input$riskier == 0)
-    {
-      selected_portfolio = both_portfolios()[['default']]
-    } else{
-      selected_portfolio = both_portfolios()[['riskier']]
-      
-    }
-    return(list(selected_portfolio[[1]], selected_portfolio[[2]], selected_portfolio[[3]])) #df, mu_port, risk_port
+  # optimal_portfolio = reactive({
+  #   req(both_portfolios())
+  #   req(!is.na(full_weights_list()))
+  #                                
+  #   if(is.null(input$riskier) || input$riskier == 0)
+  #   {
+  #     selected_portfolio = both_portfolios()[['default']]
+  #   } else{
+  #     selected_portfolio = both_portfolios()[['riskier']]
+  #     
+  #   }
+  #   return(list(selected_portfolio[[1]], selected_portfolio[[2]], selected_portfolio[[3]])) #df, mu_port, risk_port
+  #   
+  # })
+  
+  
+  output$bet_risk_selector_ui = renderUI({
+    req(all_portfolios())
+    sliderInput(inputId = 'bet_risk_selector', label = "Risk Level (High to Low)", min = 1, max = length( all_portfolios()[[1]]), value =  all_portfolios()[[2]], step = 1)
+  })
+  
+  
+  
+shown_portfolio = reactive({
+    req(all_portfolios())
+    req(portfolio_res_ready_to_show())
     
+    portfolios = all_portfolios()[[1]]
+    best_indx = all_portfolios()[[2]]
+    
+  
+    chosen_indx = if (is.null(input$bet_risk_selector)) best_indx else as.integer(input$bet_risk_selector)
+    
+    res = portfolios[[chosen_indx]][['weights']] %>%
+      mutate(BetAmount = BetWeight*input$optimization_bet_amt,
+             ToPay = ifelse(as.numeric(Odds) < 0, BetAmount + BetAmount*(100/abs(as.numeric(Odds))), BetAmount + BetAmount*(as.numeric(Odds)/100))) %>%
+      select(-BetWeight) %>%
+      filter(BetAmount > 0.1)
+    total_bet_amount = sum(res$BetAmount) #in case it got smaller when we tookout BetAmount < 0.1
+    res$BetAmount = input$optimization_bet_amt*(res$BetAmount/total_bet_amount)
+    
+    
+    return(list(res,
+                portfolios[[chosen_indx]][['mu']],
+                portfolios[[chosen_indx]][['sd']],
+                portfolios[[chosen_indx]][['sharpe']]))
   })
   
   output$portfolio_optimization_output = renderDataTable({
-    req(optimal_portfolio())
-    req(portfolio_res_ready_to_show())
-   res = optimal_portfolio()[[1]] %>%
-     mutate(BetAmount = BetWeight*input$optimization_bet_amt,
-            ToPay = ifelse(as.numeric(Odds) < 0, BetAmount + BetAmount*(100/abs(as.numeric(Odds))), BetAmount + BetAmount*(as.numeric(Odds)/100))) %>%
-     select(-BetWeight) %>%
-     filter(BetAmount > 0.1)
-   total_bet_amount = sum(res$BetAmount) #in case it got smaller when we tookout BetAmount < 0.1
-   res$BetAmount = 50*(res$BetAmount/total_bet_amount)
+    req(shown_portfolio())
+    res = shown_portfolio()[[1]]
    
-   
-   
-   tryCatch({
-     sheet_append(ss = sheet_id, data = res %>%
-                    mutate(name = rownames(res),
-                           max_bets = input$max_bets,
-                           time = format(lubridate::with_tz(Sys.time(), "America/New_York"),
-                                         "%Y-%m-%d %I:%M %p")) %>%
-                    select(max_bets, name, Odds, BetAmount, ToPay, time),
-                  sheet = 'portfolio_bet_recommendations')
-     showNotification("✅  Successfully Updated", type = "message", duration = 5)
-   }, error = function(e) {
-     showNotification(paste0("❌ Failed to write: ", e$message), type = "error", duration = 7)
-   }, finally = {
-     shinyjs::enable("write_row")
-   })
-   
-   res %>%
-     datatable(options = list(dom = 't')) %>% formatCurrency(c('BetAmount', 'ToPay'), digits = 2)
+    res %>%
+      datatable(options = list(dom = 't', paging = FALSE)) %>% formatCurrency(c('BetAmount', 'ToPay'), digits = 2)
   })
   
-  output$portfolio_return = renderUI({
-    req(optimal_portfolio())
+  output$help_understand_metrics_button_ui = renderUI({
+    req(shown_portfolio())
     req(portfolio_res_ready_to_show())
-    ev_portfolio = optimal_portfolio()[[2]]*input$optimization_bet_amt
+    
+    actionButton(
+    inputId = "help_btn",
+    label   = NULL,                     
+    icon    = icon("question-circle"),   
+    class   = "btn btn-outline-secondary btn-sm"
+  )
+  })
+  
+  observeEvent(input$help_btn, {
+    showModal(
+      modalDialog(
+        title = div(icon("circle-question"), "How to read these metrics"),
+        easyClose = TRUE,
+        size = "m",
+        footer = modalButton("Close"),
+        tagList(
+          # Expected Profit
+          tags$div(class = "mb-3",
+                   tags$h4(class = "h5 mb-1", "Expected Profit"),
+                   tags$p(class = "text-muted",
+                          "Combines your win probability (and the associated payout) ",
+                          "with the loss probability (and the staked loss) for each bet,",
+                          "to give your expected profit for the week.",
+                          "Profit is net payout above and beyond your original bet."
+                   )
+          ),
+          
+          tags$hr(),
+          
+          # Risk score
+          tags$div(class = "mb-3",
+                   tags$h4(class = "h5 mb-1", "Risk Score"),
+                   tags$p(class = "text-muted",
+                          "Variance-based score: higher = more volatile outcomes."),
+                   tags$ul(class = "mb-0",
+                           tags$li(
+                             tags$span(class = "badge bg-danger me-1", "10+"),
+                             "Very risky portfolio"
+                           ),
+                           tags$li(
+                             tags$span(class = "badge bg-warning text-dark me-1", "4–10"),
+                             "Risky"
+                           ),
+                           tags$li(
+                             tags$span(class = "badge bg-info text-dark me-1", "1–4"),
+                             "Moderate risk"
+                           ),
+                           tags$li(
+                             tags$span(class = "badge bg-success me-1", "< 1"),
+                             "Lower risk (comfortable range for portfolios)"
+                           )
+                   )
+          ),
+          
+          tags$hr(),
+          
+          # Sharpe Ratio
+          tags$div(
+            tags$h4(class = "h5 mb-1", "Sharpe Ratio"),
+            tags$p(class = "text-muted",
+                   "Return per standard deviation (expected return ÷ sqrt(Risk)). This is a metric that tries to maximize return while minimizing risk."),
+            tags$ul(class = "mb-0",
+                    tags$li(tags$span(class = "badge bg-danger me-1", "< 0.0"),
+                            "Very bad (worse than risk-free investments like cash)"),
+                    tags$li(tags$span(class = "badge bg-warning text-dark me-1", "0.0–0.5"),
+                            "Poor"),
+                    tags$li(tags$span(class = "badge bg-secondary me-1", "0.5–1.0"),
+                            "Okay"),
+                    tags$li(tags$span(class = "badge bg-primary me-1", "1.0–1.5"),
+                            "Good"),
+                    tags$li(tags$span(class = "badge bg-success me-1", "1.5–2.0"),
+                            "Very good"),
+                    tags$li(tags$span(class = "badge bg-success me-1", "> 2.0"),
+                            "Excellent"),
+                    tags$li(tags$span(class = "badge bg-success me-1", "> 3.0"),
+                            "Rare (sanity-check your inputs)")
+            )
+          )
+        )
+      )
+    )
+  })
+
+  
+  output$portfolio_return = renderUI({
+    req(shown_portfolio())
+    req(portfolio_res_ready_to_show())
+    ev_portfolio = shown_portfolio()[[2]]*input$optimization_bet_amt
     p(paste0('Portfolio Expected Profit for a $', input$optimization_bet_amt, ' bet: $', round(ev_portfolio)))
   })
   
   output$portfolio_risk = renderUI({
-    req(optimal_portfolio())
+    req(shown_portfolio())
     req(portfolio_res_ready_to_show())
-    risk_portfolio = optimal_portfolio()[[3]]^2 #variance risk score
+    risk_portfolio = shown_portfolio()[[3]]^2 #variance risk score
     p(paste0('Portfolio Risk Score: ', round(risk_portfolio,2)))
   })
   
+  output$portfolio_sharpe = renderUI({
+    req(shown_portfolio())
+    req(portfolio_res_ready_to_show())
+    sharpe_portfolio = shown_portfolio()[[4]]
+    p(paste0('Portfolio Sharpe Ratio: ', round(sharpe_portfolio,2)))
+  })
+  
   output$optimization_instructions = renderUI({
-    req(optimal_portfolio())
+    req(shown_portfolio())
     req(portfolio_res_ready_to_show())
     p('If you end up placing the above recommended bet portfolio, click the below button to log your bets.')
   })
   
   output$log_portfolio_optimization_bet = renderUI({
-    req(optimal_portfolio())
+    req(shown_portfolio())
     req(portfolio_res_ready_to_show())
     actionButton('log_portfolio_optimization_bet', 'Log My Bets')
   })
@@ -1295,11 +1421,13 @@ server <- function(input, output, session) {
 
   
   observeEvent(input$log_portfolio_optimization_bet, {
-  
+    
     output$optimization_bets <- renderUI({
-      req(optimal_portfolio())
-      df <- optimal_portfolio()[[1]]  # data.frame with BetWeight, Odds; rownames are bet labels
+      req(shown_portfolio())
+      df = shown_portfolio()[[1]]  # data.frame with BetWeight, Odds; rownames are bet labels
+      
       ids <- seq_len(nrow(df))
+      
       
       tagList(
         textInput(inputId = 'optimization_bettor_name', label = 'Your Name'),
@@ -1310,7 +1438,7 @@ server <- function(input, output, session) {
             numericInput(
               inputId = paste0("bet_amt_", i),
               label   = paste("Bet Amount:", bet_label),
-              value   = round(df$BetWeight[i]*input$optimization_bet_amt,2),
+              value   = round(df$BetAmount[i],2),
               min     = 0
             ),
             textInput(
@@ -1324,49 +1452,241 @@ server <- function(input, output, session) {
       )
     })
     
+    output$bet_help = renderUI({
+      port_df = shown_portfolio()[[1]] %>% select(BetAmount)
+      bets = str_extract(rownames(port_df), '(Anytime TD Scorer)|((Receiving|Rushing|Passing)[0-9]+\\+)')
+      categories = gsub('[0-9]+\\+', '', bets)
+      player_names = trimws(sapply(1:nrow(port_df), function(x) gsub('(Anytime TD Scorer)|((Receiving|Rushing|Passing)[0-9]+\\+)', '', rownames(port_df)[x])))
+      port_df$Bet = rownames(port_df)
+      rownames(port_df) = NULL
+      port_df = port_df %>% mutate(category = categories,
+                                   cleaned_names = clean_names(player_names)) %>%
+        left_join(results() %>% mutate(cleaned_names = clean_names(Player)) %>% select(cleaned_names, Team, Opp, Timeslot, posix_timestamp) %>% distinct(), join_by('cleaned_names'))
+      port_df$game = sapply(1:nrow(port_df), function(x) paste(sort(c(port_df$Team[x], port_df$Opp[x])), collapse = '-'))
+      port_df = port_df %>% arrange(category, posix_timestamp, game) %>% mutate(BetAmount = round(BetAmount, 2)) %>% select(category, Timeslot, game, Bet, BetAmount)
+      
+      bet_display = 
+          lapply(split(port_df, port_df$category), function(cat_df) {
+            div(
+              h2(paste0(unique(cat_df$category), ':')),
+            lapply(split(cat_df, cat_df$Timeslot), function(timeslot_df) {
+              div(
+                h3(paste(unique(timeslot_df$Timeslot), 'Games')),
+                lapply(split(timeslot_df, timeslot_df$game), function(game_df) {
+                  div(
+                    h4(paste(unique(game_df$game), 'bets')),
+                    HTML(paste(paste0(game_df$Bet,': $', game_df$BetAmount), collapse = '<br/>'))
+                  )
+                })
+              )
+            }
+          )
+            )
+        })
+  
+  do.call(tagList, bet_display)
+    })
+    
     showModal(modalDialog(
-      tags$h2('Import Bets Info'),
-      tags$br(),
-      uiOutput('optimization_bets'),
-      actionButton('submit_optimization_bets', 'Submit')
+      tabsetPanel(
+        tabPanel('Log Bets',
+          tags$h2('Import Bets Info'),
+          tags$br(),
+          uiOutput('optimization_bets'),
+          actionButton('submit_optimization_bets', 'Submit')
+        ),
+        tabPanel('Bet Helper',
+                uiOutput("bet_help")
+                 )
+      )
+        
     ))
     
-    observeEvent(input$submit_optimization_bets, {
-      df <- req(optimal_portfolio()[[1]])
-      ids <- seq_len(nrow(df))
-      
-      bet_amounts <- sapply(ids, function(i) input[[paste0("bet_amt_", i)]])
-      bet_odds    <- sapply(ids, function(i) input[[paste0("bet_odds_", i)]])
-      
-      updated <- cbind(
-        id = sample(1:1000000, nrow(df)),
-        Season = latest_season,
-        Week = latest_week,
-        Bettor = input$optimization_bettor_name,
-        Player = gsub('(Anytime TD Scorer)|(Rushing[0-9]+\\+)|(Receiving[0-9]+\\+)|(Receiving[0-9]+\\+)', '', rownames(df)) %>% trimws(),
-        Bet_Type = ifelse(str_detect(rownames(df), 'Anytime TD Scorer'), 'Anytime TD Scorer', str_extract(rownames(df), 'Rushing|Passing|Receiving')),
-        Label = ifelse(str_detect(rownames(df), 'Anytime TD Scorer'), 'Anytime TD Scorer', str_extract(rownames(df), '[0-9]+\\+')),
-        Odds = bet_odds,
-        Amount = bet_amounts,
-        Time_Submitted = Sys.time() %>% format('%Y-%m-%d %I:%M %p'),
-        Type = 'Optimization Recommender') %>%
-        data.frame() %>%
-        mutate(clean_name = clean_names(Player)) %>%
-        inner_join(results() %>% mutate(clean_name = clean_names(Player)) %>% select(clean_name, Team, Opp, posix_timestamp, Timeslot) %>% distinct(), join_by ('clean_name')) %>%
-        distinct()%>%
-        select(-clean_name)
-      
-      tryCatch({
-        sheet_append(ss = sheet_id, data = updated, sheet = 'bets_placed')
-        showNotification("✅  Successfully Updated", type = "message", duration = 5)
-      }, error = function(e) {
-        showNotification(paste0("❌ Failed to write: ", e$message), type = "error", duration = 7)
-      }, finally = {
-        shinyjs::enable("write_row")
-      })
-      
-    })
+   
   })
+  
+  observeEvent(input$submit_optimization_bets, {
+    df <- req(shown_portfolio()[[1]])
+    ids <- seq_len(nrow(df))
+    
+    bet_amounts <- sapply(ids, function(i) input[[paste0("bet_amt_", i)]])
+    bet_odds    <- sapply(ids, function(i) input[[paste0("bet_odds_", i)]])
+    
+    mu = shown_portfolio()[[2]]
+    sd = shown_portfolio()[[3]]
+    sharpe = shown_portfolio()[[4]]
+    
+    updated <- cbind(
+      id = sample(1:1000000, nrow(df)),
+      Season = latest_season,
+      Week = latest_week,
+      Bettor = input$optimization_bettor_name,
+      Player = gsub('(Anytime TD Scorer)|(Rushing[0-9]+\\+)|(Receiving[0-9]+\\+)|(Passing[0-9]+\\+)', '', rownames(df)) %>% trimws(),
+      Bet_Type = ifelse(str_detect(rownames(df), 'Anytime TD Scorer'), 'Anytime TD Scorer', str_extract(rownames(df), 'Rushing|Passing|Receiving')),
+      Label = ifelse(str_detect(rownames(df), 'Anytime TD Scorer'), 'Anytime TD Scorer', str_extract(rownames(df), '[0-9]+\\+')),
+      Odds = bet_odds,
+      Amount = bet_amounts,
+      Time_Submitted = Sys.time() %>% format('%Y-%m-%d %I:%M %p'),
+      Type = 'Optimization Recommender',
+      Portfolio_Mu = mu,
+      Portfolio_Sd = sd,
+      Portfolio_Sharpe = sharpe) %>%
+      data.frame() %>%
+      mutate(clean_name = clean_names(Player)) %>%
+      inner_join(results() %>% mutate(clean_name = clean_names(Player)) %>% select(clean_name, Team, Opp, posix_timestamp, Timeslot) %>% distinct(), join_by ('clean_name')) %>%
+      distinct()%>%
+      select(-clean_name)
+    
+    tryCatch({
+      sheet_append(ss = sheet_id, data = updated %>% filter(Amount > 0), sheet = 'bets_placed')
+      showNotification("✅  Successfully Updated", type = "message", duration = 5)
+    }, error = function(e) {
+      showNotification(paste0("❌ Failed to write: ", e$message), type = "error", duration = 7)
+    }, finally = {
+      shinyjs::enable("write_row")
+    })
+    
+  })
+  
+  
+  #CHEAT SHEETS
+  
+  all_bets = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vTyIaWWovW2YUP1-JxYpg9ZHpF7a2i_7AEVan5ptaBBiwj6gwYp0STpE8HvYILR190HTrOFt2GMyUqn/pub?gid=95780958&single=true&output=csv') %>% mutate(id = as.character(id))
+  current_week_bets = all_bets %>% filter(Week == latest_week & Season == latest_season)  %>% select(id, Bettor, Season, Week, Player,Bet_Type, Label, Team, Opp, Gametime, Timeslot)
+  bet_results = all_bets %>% left_join(read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vTyIaWWovW2YUP1-JxYpg9ZHpF7a2i_7AEVan5ptaBBiwj6gwYp0STpE8HvYILR190HTrOFt2GMyUqn/pub?gid=1472501972&single=true&output=csv') %>% mutate(id = as.character(id)),
+                                    join_by('id'))
+
+  
+  
+  output$bettor_choice_ui = renderUI({
+    pickerInput(inputId = 'cheat_sheet_bettors', label = 'Choose bettors to view on cheat sheet', choices = sort(unique(current_week_bets$Bettor)), multiple = TRUE)
+  })
+  
+  output$survivor_teams_ui = renderUI({
+    pickerInput(inputId = 'survivor_teams', label = 'Survivor pool teams for this week', choices = results() %>% left_join(team_lookup_table, join_by('Team')) %>% select(FullName) %>% distinct() %>% arrange(FullName), multiple = TRUE)
+  })
+  output$cheat_sheet_button_ui = renderUI({
+    downloadButton('cheat_sheet_button', "Generate This Week's Cheat Sheet")
+  })
+  output$cheat_sheet_button = downloadHandler(
+    filename = function() {
+      paste0('Week', latest_week, 'CheatSheet.html')
+    },
+    content = function(file) {
+      params = list(
+        bet_table =  current_week_bets %>% filter(Bettor %in% input$cheat_sheet_bettors),
+        survivor_teams = input$survivor_teams,
+        depth_charts = depth_charts,
+        team_lookup_table = team_lookup_table
+      )
+      out_dir   = tempdir()
+      out_name  = paste0('Week', latest_week, '-CheatSheet.html')
+      out_path  = file.path(out_dir, out_name)
+      
+      
+      rmarkdown::render(
+        input         = 'BetWeeklySummary.Rmd',
+        output_format = 'html_document',
+        output_file   = out_name,
+        output_dir    = out_dir,
+        params        = params,
+        envir         = new.env(parent = globalenv())
+      )
+        
+      file.copy(from = out_path, to = file, overwrite = TRUE)
+    }
+  )
+  
+  output$choose_bettor_summary_ui = renderUI({
+    pickerInput(inputId = 'summary_bettors', label = 'Choose bettors to view summaries', choices = sort(unique(all_bets$Bettor)), multiple = TRUE)
+  })
+  
+  output$summary_only_finished = renderUI({
+    checkboxInput(inputId = 'summary_finished', label = "Do not include unfinished bets", value = FALSE)
+  })
+  
+  bet_summary_filtered = reactive({
+    req(bet_results)
+    req(length(input$summary_bettors) > 0)
+    bet_subset = bet_results %>% filter(Bettor %in% input$summary_bettors)
+    if(input$summary_finished)
+    {
+      bet_subset = bet_subset %>% filter(!is.na(Result))
+    }
+    bet_subset %>% mutate(Payout = ifelse(Result == 'Win', ifelse(Odds > 0, Amount+(Amount*Odds)/100, Amount + (100*Amount/(-1*Odds))), 0)) 
+  })
+  
+  output$bet_overall_summaries = renderDataTable({
+    req(bet_summary_filtered())
+    bet_summary_filtered() %>% group_by(Bettor, Season) %>% summarise(Total_Bet = sum(Amount), Total_Payout = sum(Payout), Total_Return = sum(Payout) - sum(Amount), Total_Return_Percent = (sum(Payout) - sum(Amount))/sum(Amount)) %>%
+     arrange(Bettor, Season) %>% datatable(caption = tags$caption(style = "caption-side: top; text-align: left; font-weight:600;", "Overall Seasonal Summary Per Bettor"
+     ), options = list(dom = 't')) %>% formatPercentage('Total_Return_Percent') %>% formatCurrency(c('Total_Return', 'Total_Payout', 'Total_Bet'))
+  })
+  
+  weekly_bet_summaries = reactive({
+    req(bet_summary_filtered())
+    bet_summary_filtered() %>% mutate(SeasonWeek = paste(Season, 'Week', Week)) %>% group_by(Bettor, SeasonWeek) %>% summarise(Total_Bet = sum(Amount), Total_Payout = sum(Payout), Total_Return = sum(Payout) - sum(Amount), Total_Return_Percent = (sum(Payout) - sum(Amount))/sum(Amount)) %>%
+      arrange(Bettor,SeasonWeek)
+  })
+  remove_dup_bets = reactive({
+    req(bet_summary_filtered())
+    bet_summary_filtered() %>% arrange(Week, Player, Bet_Type, Label) %>% group_by(Season, Week, Player, Bet_Type, Label) %>% slice(1) %>% ungroup()
+  })
+  
+  
+  output$bet_summary_by_week = renderDataTable({
+    req(weekly_bet_summaries())
+    weekly_bet_summaries() %>% datatable(caption = tags$caption(style = "caption-side: top; text-align: left; font-weight:600;", "Weekly Bet Summary (Detailed)"
+    ), options = list(dom = 't')) %>% formatPercentage('Total_Return_Percent') %>% formatCurrency(c('Total_Return', 'Total_Payout', 'Total_Bet'))
+  })
+  
+  output$bet_summary_by_week_reorganized = renderDataTable({
+    req(weekly_bet_summaries())
+    df = weekly_bet_summaries() %>% select(Bettor, SeasonWeek, Total_Return_Percent) %>% pivot_wider(names_from = SeasonWeek, values_from = Total_Return_Percent)
+    df %>% datatable(caption = tags$caption(style = "caption-side: top; text-align: left; font-weight:600;", "Weekly Bet Summary (Condensed)"
+    ), options = list(dom = 't')) %>% formatPercentage(2:ncol(df)) 
+  })
+  
+  output$bet_summary_by_type = renderDataTable({
+    req(remove_dup_bets())
+    remove_dup_bets() %>% filter(!is.na(Result)) %>% group_by(Bet_Type) %>% summarise(Number_Bets_Placed = n(), Total_Bet = sum(Amount), Total_Payout = sum(Payout), Total_Return = sum(Payout) - sum(Amount), Total_Return_Percent =(sum(Payout) - sum(Amount))/sum(Amount)) %>%
+      datatable(caption = tags$caption(style = "caption-side: top; text-align: left; font-weight:600;","Return by Bet Type"), options = list(dom = 't')) %>%
+      formatPercentage('Total_Return_Percent') %>% formatCurrency(c('Total_Return', 'Total_Payout', 'Total_Bet'))
+  })
+  
+  output$bet_summary_by_portfolio_type = renderDataTable({
+    req(remove_dup_bets())
+    remove_dup_bets() %>% filter(!is.na(Result)) %>% group_by(Type) %>% summarise(Number_Bets_Placed = n(), Total_Bet = sum(Amount), Total_Payout = sum(Payout), Total_Return = sum(Payout) - sum(Amount), Total_Return_Percent =(sum(Payout) - sum(Amount))/sum(Amount)) %>%
+      datatable(caption = tags$caption(style = "caption-side: top; text-align: left; font-weight:600;", 'Return by Optimizer vs Individual Bet'), options = list(dom = 't')) %>%
+      formatPercentage('Total_Return_Percent') %>% formatCurrency(c('Total_Return', 'Total_Payout', 'Total_Bet'))
+  })
+  
+  output$bet_summary_by_odds_range = renderDataTable({
+    levels_odds = c(
+      'Negative Odds',
+      'Positive Odds Up To +250',
+      'Odds +251 to +450',
+      'Odds +451 to +650',
+      'Odds +651 to +1000',
+      'Odds +1000 to +2000',
+      'Odds above +2000'
+    )
+    remove_dup_bets() %>% filter(!is.na(Result)) %>% mutate(
+      Odds_Range = case_when(
+        Odds < 0 ~ 'Negative Odds',
+        Odds < 250 ~ 'Positive Odds Up To +250',
+        Odds < 450 ~ 'Odds +251 to +450',
+        Odds < 650 ~ 'Odds +451 to +650',
+        Odds < 1000 ~ 'Odds +651 to +1000',
+        Odds < 2000 ~ 'Odds +1000 to +2000',
+        .default = 'Odds above +2000'
+      ),
+      Odds_Range = factor(Odds_Range, levels = levels_odds, ordered = TRUE) #keep it from reordering
+    ) %>% group_by(Odds_Range) %>% summarise(Number_Bets_Placed = n(), Pct_Win = mean(Result == 'Win'),Total_Bet = sum(Amount),  Total_Payout = sum(Payout), Total_Return = sum(Payout) - sum(Amount), Total_Return_Percent =(sum(Payout) - sum(Amount))/sum(Amount)) %>%
+      datatable(caption = tags$caption(style = "caption-side: top; text-align: left; font-weight:600;", 'Return by Odds Range'), options = list(dom = 't')) %>%
+      formatPercentage(c('Total_Return_Percent', 'Pct_Win'), digits = 1) %>% formatCurrency(c('Total_Return', 'Total_Payout', 'Total_Bet'))
+  })
+  
   
 
 
