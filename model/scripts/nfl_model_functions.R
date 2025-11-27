@@ -5,13 +5,13 @@ library(stringr)
 
 create_iv_tables = function(df, response_var, var_list, column_categories)
 {
-  
   all_bins = rbind()
   all_ivs = rbind()
   for(r in response_var)
   {
     for (var in var_list)
     {
+      print(var)
       overall_mean = df %>% select(r) %>% pull() %>% mean()
       
       bins = woebin(df, y = r, x = var, bin_num_limit = 6, check_cate_num = FALSE, print_step = 0, print_info = FALSE) %>% data.frame() %>% select(!!sym(paste0(var, '.variable')), !!sym(paste0(var,'.bin')),!!sym(paste0(var,'.bin_iv')), !!sym(paste0(var,'.total_iv')), !!sym(paste0(var, '.posprob')), !!sym(paste0(var, '.count')))
@@ -102,13 +102,11 @@ create_iv_tables = function(df, response_var, var_list, column_categories)
     Total_IV <= 0.5 ~ 'High',
     .default = 'Suspicious'
   ))
-  
   return(list(all_ivs,all_bins))
 }
 
 get_specific_iv_table = function(df, iv_table, bin_table, predictive_power_choice, column_categories, bin_iv_limit)
 {
-  
   if(predictive_power_choice != 'Significant')
   {
     iv_predictive_power = iv_table %>%
@@ -171,7 +169,6 @@ this_or_that_results = function(ivs, this_or_that, responses)
       }
     }
   }
-  
   return(this_or_that)
 }
 
@@ -244,6 +241,8 @@ iv_to_dummy = function(df, bins, response_vars, this_or_that_table)
     }
     this_or_that_not_used = setdiff(c(this_or_that_table$option1, this_or_that_table$option2), this_or_that_table[,paste0('decision_',r)])
     print(r)
+    
+    colnames(df_this_r) = sapply(colnames(df_this_r), function(x) substring(x, 1, 1000))
     df_this_r = df_this_r %>% select(-any_of(c(this_or_that_not_used, setdiff(response_vars, r))))
     new_dfs = append(new_dfs, list(df_this_r))
   }
@@ -285,6 +284,7 @@ data_prep = function(df, response, pre_model = FALSE)
 
 run_gbm = function(df, model_name, response, path, t_per_s, i_range, s_range, n_range, b_range)
 {
+  set.seed(1)
   df = data_prep(df, response, pre_model = TRUE)
   
   #random subset if too big:
@@ -293,8 +293,8 @@ run_gbm = function(df, model_name, response, path, t_per_s, i_range, s_range, n_
     df = df[sample(1:nrow(df), 15000000/ncol(df)),]
     s_range = s_range[s_range <= 0.05] #no large shrinkage if data is huge
   }
-
-  models = list()
+  best_avg_buckets_error = Inf
+  best_model = NULL
   tuning=rbind()
   for (i in i_range)
   {
@@ -333,7 +333,8 @@ run_gbm = function(df, model_name, response, path, t_per_s, i_range, s_range, n_
                         n.minobsinnode = n,
                         cv.folds = 5,
                         bag.fraction = bag,
-                        weights = weights)
+                        weights = weights,
+                        keep.data = FALSE)
           } else {
             model = gbm(formula = formula,
                         data = train,
@@ -343,7 +344,8 @@ run_gbm = function(df, model_name, response, path, t_per_s, i_range, s_range, n_
                         shrinkage = s,
                         n.minobsinnode = n,
                         cv.folds = 5,
-                        bag.fraction = bag)
+                        bag.fraction = bag,
+                        keep.data = FALSE)
           }
           print('model done')
           best_tree = gbm.perf(model, method = "cv", plot.it = FALSE)
@@ -354,33 +356,32 @@ run_gbm = function(df, model_name, response, path, t_per_s, i_range, s_range, n_
           recall = res[[3]]          
           
           eval_buckets_res = evaluate_buckets(buckets)
-          avg_buckets_error = eval_buckets_res[1]
-          median_buckets_error = eval_buckets_res[2]
-          min_buckets_error = eval_buckets_res[3]
-          max_buckets_error = eval_buckets_res[4]
+          avg_buckets_error    = as.numeric(eval_buckets_res[[1]])
+          median_buckets_error = as.numeric(eval_buckets_res[[2]])
+          min_buckets_error    = as.numeric(eval_buckets_res[[3]])
+          max_buckets_error    = as.numeric(eval_buckets_res[[4]])
           
-          print('adding to tuning:')
-          models = append(models, list(model))
+          if(!is.na(avg_buckets_error) && avg_buckets_error < best_avg_buckets_error)
+          {
+            best_model = model
+            best_avg_buckets_error = avg_buckets_error
+          }
+          rm(model)
+          rm(train, valid)
+          gc(FALSE)
           tuning = rbind(tuning, cbind(Response = response, trees = best_tree, idepth = i, shrink = s, nmino = n, bag = bag, precision, recall, avg_buckets_error, prevalence = mean(df[,response])))
           }
       }
     }
   }
   tuning = data.frame(tuning)
-  missing_avg_error_indices = which(is.na(tuning$avg_buckets_error))
-  if(length(missing_avg_error_indices) > 0)
-  {
-    nonmissing_tuning = tuning[-missing_avg_error_indices,]
-    models = models[-missing_avg_error_indices]
-  } else {
-    nonmissing_tuning = tuning
-  }
-  optimal_tuning_index = which.min(nonmissing_tuning$avg_buckets_error)
-  optimal_model = models[optimal_tuning_index][[1]]
   #write the original tuning to rds, and the best model:
   saveRDS(tuning, tolower(paste0('model/tunings_and_models/',model_name,'/',path,'/all_tunings_',response,'.rds')))
-  saveRDS(optimal_model, tolower(paste0('model/tunings_and_models/',model_name,'/',path,'/model_',response,'.rds')))
-
+  if(!is.null(best_model))
+  {
+    saveRDS(best_model, tolower(paste0('model/tunings_and_models/',model_name,'/',path,'/model_',response,'.rds')))
+  }
+  rm(best_model)
 }
 
 

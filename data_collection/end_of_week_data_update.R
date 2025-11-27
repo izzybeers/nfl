@@ -23,10 +23,9 @@ basic_cols = c('player_id', 'Name', 'names', 'Position', 'Month', 'Gtm', 'Week',
 missing_cutoff = 0.95
 
 this_season = 2025
-this_week = 6
+this_week = 13
 data_collection_min_year = this_season - 2 #need 2 years of historical data for feature engineering
-qb1_by_year = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vT9_LcNO2d8L5kzbJQZZti9kxfAZRFRAl2oJz5WlpusfvL1txbkc8OU6BSlB54TA9HCBHRlIxi9MpuT/pub?gid=1914165552&single=true&output=csv') %>%
-  filter(Season == this_season)
+qb1_by_year = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vT9_LcNO2d8L5kzbJQZZti9kxfAZRFRAl2oJz5WlpusfvL1txbkc8OU6BSlB54TA9HCBHRlIxi9MpuT/pub?gid=1914165552&single=true&output=csv')
 
 
 # player_bios = readRDS('data_collection/saved_data_files/player_bios.rds')
@@ -38,6 +37,12 @@ player_gamelogs_results = get_player_gamelogs(year_cutoff = this_season, max_yea
                                               gamelog_html_table_tag, gamelog_html_playoff_table_tag, gamelog_advanced_html_rushing_table_tag, gamelog_advanced_html_passing_table_tag, gamelog_advanced_playoffs_html_passing_table_tag, gamelog_advanced_playoffs_html_rushing_table_tag,
                                               wk = this_week - 1, response_only = TRUE)
 
+player_bios = readRDS('data_collection/saved_data_files/player_bios.rds')
+combined_gamelogs = readRDS('data_collection/saved_data_files/player_gamelogs.rds')
+combined_team_gamelogs = readRDS('data_collection/saved_data_files/team_gamelogs.rds')
+combined_player_rankings = readRDS('data_collection/saved_data_files/player_rankings_within_team.rds')
+combined_playoff_data = readRDS('data_collection/saved_data_files/playoff_clinching_table.rds')
+combined_injuries_data = readRDS('data_collection/saved_data_files/injuries_data.rds')
 # missing_players = setdiff(player_gamelogs_results$player_id, past_week_gamelogs$player_id)
 # missing_player_gamelogs_results = get_player_gamelogs(year_cutoff = this_season, max_year_cutoff = this_season, player_bios = player_bios[which(player_bios$max_year == this_season),] %>% filter(player_id %in% missing_players), basic_cols = basic_cols, missing_threshold = missing_cutoff,
 #                                               gamelog_html_table_tag, gamelog_html_playoff_table_tag, gamelog_advanced_html_rushing_table_tag, gamelog_advanced_html_passing_table_tag, gamelog_advanced_playoffs_html_passing_table_tag, gamelog_advanced_playoffs_html_rushing_table_tag,
@@ -51,7 +56,7 @@ touchdown_results = player_gamelogs_results %>% select(player_id, Season, Week, 
 #update gamelogs and all other raw files by combining it with the prediction raw data files from last week
 
 full_gamelogs = readRDS('data_collection/saved_data_files/player_gamelogs.rds')
-past_week_gamelogs = readRDS(paste0('model/prediction_results/raw_data/', this_season, '_wk', (this_week-1), '_player_gamelogs_df')) %>% select(-any_of(c('Passing_Yds', 'Rushing_Yds', 'Receiving_Yds', 'Total_Touchdowns', 'GS'))) %>% left_join(player_gamelogs_results %>% select(player_id, Passing_Yds, Rushing_Yds, Receiving_Yds, Total_Touchdowns,GS), join_by('player_id'))
+past_week_gamelogs = readRDS(paste0('model/prediction_results/raw_data/', this_season, '_wk', (this_week-1), '_player_gamelogs_df.rds')) %>% select(-any_of(c('Passing_Yds', 'Rushing_Yds', 'Receiving_Yds', 'Total_Touchdowns', 'GS'))) %>% left_join(player_gamelogs_results %>% select(player_id, Passing_Yds, Rushing_Yds, Receiving_Yds, Total_Touchdowns,GS), join_by('player_id'))
 combined_gamelogs = rbind(full_gamelogs, past_week_gamelogs %>% select(any_of(colnames(full_gamelogs))))
 saveRDS(combined_gamelogs, 'data_collection/saved_data_files/player_gamelogs.rds')
 
@@ -64,6 +69,7 @@ past_week_team_gamelogs = readRDS(paste0('model/prediction_results/raw_data/', t
 combined_team_gamelogs = rbind(full_team_gamelogs, past_week_team_gamelogs %>% select(any_of(colnames(full_team_gamelogs))))
 saveRDS(combined_team_gamelogs, 'data_collection/saved_data_files/team_gamelogs.rds')
 
+#FIGURE OUT WHAT IS WRONG HERE. CHECK THIS BEFORE WRITING.
 player_rankings_within_team = readRDS('data_collection/saved_data_files/player_rankings_within_team.rds')
 past_week_player_rankings = readRDS(paste0('model/prediction_results/raw_data/', this_season, '_wk', (this_week-1), '_target_rankings_df.rds'))
 combined_player_rankings = list()
@@ -78,7 +84,7 @@ for(i in 1:length(past_week_player_rankings))
     qb_starters_last_week = combined_gamelogs %>%
       filter(Season == this_season & Week == (this_week-1) & Position == 'QB' & !is.na(Passing_Yds) & GS == 1) %>%
       select(Season, Week, Team, Name) %>%
-      left_join(qb1_by_year %>% select(Team, Qb1) %>% mutate(match = 1), join_by('Name'== 'Qb1', 'Team' == 'Team')) %>% 
+      left_join(qb1_by_year %>% filter(Season == this_season) %>% select(Team, Qb1) %>% mutate(match = 1), join_by('Name'== 'Qb1', 'Team' == 'Team')) %>% 
       mutate(match = ifelse(is.na(match), 0, 1)) %>% rename('Qb1_starting' = 'match') %>% select(-Name)
     combined_player_rankings[[i]] = rbind(player_rankings_within_team[[i]], qb_starters_last_week)
   }
@@ -93,7 +99,9 @@ saveRDS(combined_weather_stadium_data, 'data_collection/saved_data_files/weather
 full_playoff_clinching_data = readRDS('data_collection/saved_data_files/playoff_clinching_table.rds')
 past_week_playoff_data = readRDS(paste0('model/prediction_results/raw_data/', this_season, '_wk', (this_week-1), '_playoff_clinching_df.rds'))  %>% select(any_of(colnames(full_playoff_clinching_data)))
 #if the playoff data is missing all the teams:
-past_week_playoff_data = cbind(past_week_playoff_data %>% select(-Team), Team = unique(team_gamelogs$Team)) %>% select(Season, Week, Team, everything())
+#CHECK THIS, NOT SURE WHY I HAVE RHIS
+# past_week_playoff_data = cbind(past_week_playoff_data %>% filtrselect(-Team), Team = unique(team_gamelogs$Team)) %>% select(Season, Week, Team, everything())
+past_week_playoff_data = past_week_playoff_data %>% select(Season, Week, Team, everything())
 combined_playoff_data = rbind(full_playoff_clinching_data, past_week_playoff_data)
 saveRDS(combined_playoff_data, 'data_collection/saved_data_files/playoff_clinching_table.rds')
 
@@ -104,28 +112,31 @@ saveRDS(combined_injuries_data, 'data_collection/saved_data_files/injuries_data.
 
 
 #decide if you want to do all data here or just the new week:
-join_res = join_all_tables(player_bios,
-                           player_gamelogs = combined_gamelogs,
+#CHANGE THIS TO JUST BE THE RECENT WEEK ADDED ON TO THE PREVIOUS DATASET
+join_res = join_all_tables(player_bios %>% filter(max_year == this_season),
+                           player_gamelogs = combined_gamelogs %>% filter(Season == this_season & Week == this_week - 1),
                            player_seasonal_stats = readRDS('data_collection/saved_data_files/player_end_of_season_summary_stats.rds'),
-                           team_gamelogs = combined_team_gamelogs,
+                           team_gamelogs = past_week_team_gamelogs,
                            team_seasonal_stats = readRDS('data_collection/saved_data_files/team_end_of_season_summary_stats.rds'),
-                           player_rankings = combined_player_rankings,
-                           weather_and_stadium_data  = combined_weather_stadium_data,
-                           playoff_clinching_data = combined_playoff_data,
-                           injuries_data = combined_injuries_data,
+                           player_rankings = past_week_player_rankings,
+                           weather_and_stadium_data  = past_week_weather_stadium_data,
+                           playoff_clinching_data = past_week_playoff_data,
+                           injuries_data = past_week_injuries_data,
                            missing_cutoff,
-                           season_data_cutoff = 2022)
+                           season_data_cutoff = this_season,
+                           qb1_by_year = qb1_by_year %>% filter(Season == this_season))
 
-old_passing_data = readRDS('model/data/passing_preliminary_data.rds')
-old_rushing_data = readRDS('model/data/rushing_preliminary_data.rds')
-old_receiving_data = readRDS('model/data/receiving_preliminary_data.rds')
-old_touchdown_data = readRDS('model/data/touchdown_preliminary_data.rds')
+old_passing_data = readRDS('model/data/passing_preliminary_data.rds') %>% filter(!(Season == this_season & Week == this_week-1))
+old_rushing_data = readRDS('model/data/rushing_preliminary_data.rds') %>% filter(!(Season == this_season & Week == this_week-1))
+old_receiving_data = readRDS('model/data/receiving_preliminary_data.rds') %>% filter(!(Season == this_season & Week == this_week-1))
+old_touchdown_data = readRDS('model/data/touchdown_preliminary_data.rds') %>% filter(!(Season == this_season & Week == this_week-1))
 
-#CHANGE THIS IF JOIN RES IS ONLY RECENT WEEK:
-saveRDS(join_res[[1]], 'model/data/passing_preliminary_data.rds')
-saveRDS(join_res[[2]], 'model/data/rushing_preliminary_data.rds')
-saveRDS(join_res[[3]], 'model/data/receiving_preliminary_data.rds')
-saveRDS(join_res[[4]], 'model/data/touchdown_preliminary_data.rds')
+
+
+saveRDS(bind_rows(old_passing_data, join_res[[1]] %>% select(any_of(colnames(old_passing_data)))), 'model/data/passing_preliminary_data.rds')
+saveRDS(bind_rows(old_rushing_data, join_res[[2]] %>% select(any_of(colnames(old_rushing_data)))), 'model/data/rushing_preliminary_data.rds')
+saveRDS(bind_rows(old_receiving_data, join_res[[3]] %>% select(any_of(colnames(old_receiving_data)))), 'model/data/receiving_preliminary_data.rds')
+saveRDS(bind_rows(old_touchdown_data, join_res[[4]] %>% select(any_of(colnames(old_touchdown_data)))), 'model/data/touchdown_preliminary_data.rds')
 
 
 saveRDS(join_res[[5]],
@@ -188,24 +199,26 @@ current_touchdown_data = readRDS('model/data/touchdown_preliminary_data.rds')
 
 model_prep_results = model_prep(current_passing_data, current_rushing_data, current_receiving_data, current_touchdown_data,
                                 passing_data_column_categories, rushing_data_column_categories, receiving_data_column_categories, touchdown_data_column_categories,
-                                train_test_split = FALSE, train_mode = TRUE) 
+                                train_test_split = TRUE, train_mode = TRUE) 
 
 
 new_passing_data = model_prep_results[[1]]
 new_rushing_data = model_prep_results[[2]]
 new_receiving_data = model_prep_results[[3]]
 new_touchdown_data = model_prep_results[[4]]
+new_passing_data_test = model_prep_results[[5]]
+new_rushing_data_test = model_prep_results[[6]]
+new_receiving_data_test = model_prep_results[[7]]
+new_touchdown_data_test = model_prep_results[[8]]
+
 saveRDS(new_passing_data, 'model/data/model_ready_passing_train_df.rds')
 saveRDS(new_rushing_data, 'model/data/model_ready_rushing_train_df.rds')
 saveRDS(new_receiving_data, 'model/data/model_ready_receiving_train_df.rds')
 saveRDS(new_touchdown_data, 'model/data/model_ready_touchdown_train_df.rds')
-
-#automatically read in when building model:
-# new_passing_data =  readRDS('model/data/model_ready_passing_train_df.rds')
-# new_rushing_data = readRDS('model/data/model_ready_rushing_train_df.rds')
-# new_receiving_data = readRDS('model/data/model_ready_receiving_train_df.rds')
-# new_touchdown_data = readRDS('model/data/model_ready_touchdown_train_df.rds')
-
+saveRDS(new_passing_data_test, 'model/data/model_ready_passing_test_df.rds')
+saveRDS(new_rushing_data_test, 'model/data/model_ready_rushing_test_df.rds')
+saveRDS(new_receiving_data_test, 'model/data/model_ready_receiving_test_df.rds')
+saveRDS(new_touchdown_data_test, 'model/data/model_ready_touchdown_test_df.rds')
 
 #train model
 type = 'super_reduced'
@@ -253,4 +266,19 @@ for(response in touchdown_response)
 }
 
 
+
+model_names = c('passing', 'rushing', 'receiving', 'touchdown')
+response_list = list(passing_response, rushing_response, receiving_response, touchdown_response)
+
+for(i in 1:length(model_names))
+{
+  res = assess_model_results(test = readRDS(paste0('model/data/model_ready_',model_names[i],'_test_df.rds')), type = type, model_category = model_names[i],responses = response_list[[i]])
+  confidence = t(res[[1]])
+  optimals = res[[2]]
+  all_tunings = res[[3]]
+  abnormal_top20_vars = res[[4]]
+  confidence[,names(abnormal_top20_vars)][1:11] = 'Low'
+  saveRDS(confidence, paste0('model/tunings_and_models/', model_names[i], '/', type,'/confidence.rds'))
+  gc()
+}
 

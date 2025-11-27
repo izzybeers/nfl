@@ -54,16 +54,15 @@ rm(new_rushing_data_test)
 rm(new_receiving_data_test)
 rm(new_touchdown_data_test)
 
-# new_passing_data = readRDS('model/data/model_ready_passing_train_df.rds')
-# new_rushing_data = readRDS('model/data/model_ready_rushing_train_df.rds')
-# new_receiving_data = readRDS('model/data/model_ready_receiving_train_df.rds')
-#new_touchdown_data = readRDS('model/data/model_ready_touchdown_train_df.rds')
-# 
-# new_passing_data_test = readRDS('model/data/model_ready_passing_test_df.rds')
-# new_rushing_data_test = readRDS('model/data/model_ready_rushing_test_df.rds')
-# new_receiving_data_test = readRDS('model/data/model_ready_receiving_test_df.rds')
-#new_touchdown_data_test = readRDS('model/data/model_ready_touchdown_test_df.rds')
+new_passing_data = readRDS('model/data/model_ready_passing_train_df.rds')
+new_rushing_data = readRDS('model/data/model_ready_rushing_train_df.rds')
+new_receiving_data = readRDS('model/data/model_ready_receiving_train_df.rds')
+new_touchdown_data = readRDS('model/data/model_ready_touchdown_train_df.rds')
 
+new_passing_data_test = readRDS('model/data/model_ready_passing_test_df.rds')
+new_rushing_data_test = readRDS('model/data/model_ready_rushing_test_df.rds')
+new_receiving_data_test = readRDS('model/data/model_ready_receiving_test_df.rds')
+new_touchdown_data_test = readRDS('model/data/model_ready_touchdown_test_df.rds')
 
 type = 'super_reduced' 
 
@@ -89,12 +88,13 @@ tune_rushing_models(
 
 t1 = Sys.time()
 tune_receiving_models(
-  t_per_s = c(750, 150),
-  i_range = c(2,5,8),
-  s_range = c(0.01,0.05),
+  t_per_s = c(1000, 300, 150),
+  i_range = c(1,3,5,7),
+  s_range = c(0.01, 0.05, 0.1),
   n_range = 10,
-  b_range = c(0.3, 0.5, 0.7),  
-  path = type
+  b_range = c(0.5, 0.7),   
+  path = type,
+  override_response_var = receiving_response[3:6]
 )
 Sys.time() - t1
 
@@ -104,7 +104,7 @@ tune_touchdown_model(
   i_range = c(2,5,8),
   s_range = c(0.01,0.05),
   n_range = 10,
-  b_range = c(0.3, 0.5, 0.7),    
+  b_range = c(0.3, 0.5, 0.7),
   path = type
 )
 Sys.time() - t1
@@ -144,3 +144,6 @@ for(i in 1:length(model_names))
 }
 
 list_of_top_vars
+
+
+

@@ -11,6 +11,7 @@ join_all_tables = function(player_bios, player_gamelogs, player_seasonal_stats,
                            injuries_data,
                            missing_cutoff,
                            season_data_cutoff,
+                           qb1_by_year,
                            predict_mode = FALSE)
 {
   
@@ -116,6 +117,7 @@ join_all_tables = function(player_bios, player_gamelogs, player_seasonal_stats,
                 mutate(Year_To_Match = Season + 2, player_id = as.character(player_id)) %>% select(-Season) %>%
                 rename("Two_Seasons_Ago_Pct_of_All_Rushing_Yds" = "Pct_Team_Rushing_Yds_Season"),
               join_by('player_id' == 'player_id', 'Season' == 'Year_To_Match')) %>%
+    filter(Season >= season_data_cutoff) %>%
     left_join(weather_and_stadium_data %>% select(-Opp) %>% mutate(Week = as.numeric(Week)), join_by('Team' == 'Team', 'Week' == 'Week', 'Season' == 'Season')) %>%
     left_join(playoff_clinching_data %>% mutate(Team = as.character(Team)) %>%
                 rename('TV_team' = 'Team') %>%
@@ -124,6 +126,9 @@ join_all_tables = function(player_bios, player_gamelogs, player_seasonal_stats,
               join_by('Season' == 'Season', 'Week' == 'Week', 'Team' == 'Team')) %>%
     left_join(injuries_data, join_by('names' == 'Player', 'Week' == 'Week', 'Season' == 'Season')) %>%
     filter(!is.na(Date)) %>% #completed games come up as NA date
+    left_join(qb1_by_year %>% mutate(Temp = 1), join_by('Season' == 'Season', 'Team' == 'Team', 'names' == 'Qb1')) %>%
+    #Qb1_starting doesn't make sense for the QB model, so deriving new field that says whether this QB is the QB1 is better:
+    mutate(Is_Qb1 = ifelse(str_detect(positions, 'QB'), ifelse(!is.na(Temp), 1, 0), NA)) %>% select(-Temp) %>%
     mutate(On_Injury_List = ifelse(is.na(On_Injury_List), 0, On_Injury_List),
            Less_Practice = ifelse(is.na(Less_Practice), 0, Less_Practice),
            Injury_Out = ifelse(Game_Status == 'Out', 1, 0),
@@ -141,30 +146,27 @@ join_all_tables = function(player_bios, player_gamelogs, player_seasonal_stats,
            age = floor(as.numeric(difftime(paste0(ifelse(Month %in% c('01','02'), Season + 1, Season),'-',Month,'-', str_pad(str_extract(Date,'[0-9]+'), 2, 'left','0')), birthday, units = 'weeks')/52)),
            game_on_birthday = ifelse(substring(birthday, 6, nchar(birthday)) == paste0(as.numeric(Month),'-', str_pad(str_extract(Date,'[0-9]+'), 2, 'left','0')), 1, 0),
            Home_Stadium = ifelse(Stadium == Team, 1, 0),
-           Home = ifelse(Game_Location == 'Home', 1, 0)
+           Home = ifelse(Game_Location == 'Home', 1, 0),
+           Qb1_starting = ifelse(str_detect(positions, 'QB'), NA, Qb1_starting)
            ) %>% select(-Game_Status)
     
-    
+    column_names = colnames(player_data) #to be called later
   
+    print(nrow(player_data))
   
   
   
   
   #get data for each model:
-  passing_data = player_data %>% filter(str_detect(positions, 'QB') & Season >= season_data_cutoff) %>%
-    left_join(qb1_by_year %>% mutate(Temp = 1), join_by('Season' == 'Season', 'Team' == 'Team', 'names' == 'Qb1')) %>%
-    #Qb1_starting doesn't make sense for the QB model, so deriving new field that says whether this QB is the QB1 is better:
-    mutate(Is_Qb1 = ifelse(!is.na(Temp), 1, 0)) %>% select(-Temp) %>% select(-Qb1_starting)
+  passing_data = player_data %>% filter(str_detect(positions, 'QB')) %>% select(-Qb1_starting)
   
-  rushing_data = player_data %>% filter(Season >= season_data_cutoff)
-  receiving_data = player_data %>% filter((!str_detect(positions, 'QB')) & Season >= season_data_cutoff)
+  rushing_data = player_data %>% select(-Is_Qb1)
+  receiving_data = player_data %>% filter((!str_detect(positions, 'QB'))) %>% select(-Is_Qb1)
   
-  touchdown_data = player_data %>%
-    left_join(qb1_by_year %>% mutate(Temp = 1), join_by('Season' == 'Season', 'Team' == 'Team', 'names' == 'Qb1')) %>%
-    #Qb1_starting doesn't make sense for the QB model, so deriving new field that says whether this QB is the QB1 is better:
-    mutate(Is_Qb1 = ifelse(str_detect(positions, 'QB'), ifelse(!is.na(Temp), 1, 0), NA),
-           Qb1_starting = ifelse(str_detect(positions, 'QB'), NA, Qb1_starting)) %>%
-    select(-Temp) 
+  touchdown_data = player_data
+  
+  rm(player_data)
+  gc()
   
   if(predict_mode == FALSE)
   {
@@ -306,10 +308,10 @@ join_all_tables = function(player_bios, player_gamelogs, player_seasonal_stats,
   misc_team_opp_info = c('Team_Last_Season_Won_Superbowl', 'Team_Two_Seasons_Ago_Won_Superbowl', 'Opp_Last_Season_Won_Superbowl', 'Opp_Two_Seasons_Ago_Won_Superbowl')
   stadium_info = c('Stadium', 'Grass_Type', 'Roof', 'Familiar_Roof_Type', 'Familiar_Grass_Type', 'Altitude', 'Stadium_Capacity', 'Loudest_Stadiums')
   injury_data = c('On_Injury_List', 'Less_Practice', 'Injury_Out', 'Injury_Questionable')
-  weather_data = c(colnames(player_data)[str_detect(tolower(colnames(player_data)), 'weather')], 'Unfamiliar_Temperature', 'Opp_Unfamiliar_Temperature')
+  weather_data = c(column_names[str_detect(tolower(column_names), 'weather')], 'Unfamiliar_Temperature', 'Opp_Unfamiliar_Temperature')
   playoff_clinching_data = c('Div_Ranking', 'Div_Pct_Wins', 'Already_Clinched_Playoff', 'Already_Clinched_Division', 'Already_Clinched_Seed1', 'Already_Eliminated', 'Already_Eliminated_Division', 'playoffs_at_stake', 'elimination_at_stake')
   qb_columns = c('Qb1_starting', 'Is_Qb1') # former for rushing/rec/td models, is_qb1 for passing model
-  rank_columns = colnames(player_data)[str_detect(tolower(colnames(player_data)), '((?<!opp_)rank_)|pct_team')]
+  rank_columns = column_names[str_detect(tolower(column_names), '((?<!opp_)rank_)|pct_team')]
   
   accounted_for_columns = c(basic_cols,
                             player_bio_data,
