@@ -17,6 +17,7 @@ model_manual_remove = c('min_year', 'max_year')
 # Set up parallel plan (you can change multisession to multicore depending on OS)
 plan(multisession, workers = 4)  # Use 4 cores; adjust to what your system can handle
 
+
 # Define a function that runs the model for one response
 run_one_model = function(response, model_name, column_categories, data_file_path, manual_remove, response_col_to_remove, path, t_per_s, i_range, s_range, n_range, b_range, df = NULL) {
   
@@ -83,7 +84,6 @@ tune_passing_models = function(t_per_s, i_range, s_range, n_range, b_range, path
 }
 
 tune_rushing_models = function(t_per_s, i_range, s_range, n_range, b_range, path, override_response_var = NULL) {
-  
   t1 = Sys.time()
   if(!is.null(override_response_var))
   {
