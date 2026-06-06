@@ -1,6 +1,8 @@
 library(dplyr)
+setwd("~/nfl")
+# source('data_collection/scripts/global.R')
+#source('model/scripts/assess_2025_returns.R')
 source('model/scripts/nfl_model_functions.R')
-source('data_collection/scripts/global.R')
 
 passing_unimportant_vars = c()
 rushing_unimportant_vars = c()
@@ -22,24 +24,27 @@ assess_model_results = function(test, type, model_category, responses)
     probability_buckets = res[[1]]
     precision = res[[2]]
     recall = res[[3]]
-    eval_buckets_res = evaluate_buckets(probability_buckets)
-    avg_buckets_error = eval_buckets_res[[1]]
-    median_buckets_error = eval_buckets_res[[2]]
-    min_buckets_error = eval_buckets_res[[3]]
-    max_buckets_error = eval_buckets_res[[4]]
-    confidence = eval_buckets_res[[5]]
-    confidence = data.frame(c(confidence, avg_buckets_error,
-                              mean(confidence == 'High'),
-                              mean(confidence %in% c('High','Medium')),
-                              mean(confidence != 'No Data')))
-    colnames(confidence) = response
-    rownames(confidence) = c(rownames(probability_buckets), 'Avg', 'Pct_High', 'Pct_Not_Low', 'Pct_No_Data')
-    all_confidence = rbind(all_confidence, t(confidence))
+    # eval_buckets_res = evaluate_buckets(probability_buckets)
+    # avg_buckets_error = eval_buckets_res[[1]]
+    # median_buckets_error = eval_buckets_res[[2]]
+    # min_buckets_error = eval_buckets_res[[3]]
+    # max_buckets_error = eval_buckets_res[[4]]
+    # confidence = eval_buckets_res[[5]]
+    pct_high = mean(probability_buckets$Assessment == 'Inside Target Range')
+    pct_high_medium = mean(probability_buckets$Assessment %in% c('Inside Target Range','Near Target Range'))
+    # confidence_summary = data.frame(rbind(
+    #                           cbind('Pct_High', pct_high),
+    #                           cbind('Pct_Not_Low', pct_high_medium),
+    #                           cbind('Pct_No_Data', mean(probability_buckets != 'Insufficient Data'))))
+    # confidence_summary$Response = response
+    # colnames(confidence_summary) = c('Metric', 'Value', 'Response')
+    all_confidence = rbind(all_confidence, probability_buckets %>% mutate(Response = response))
+    # all_confidence_summary = rbind(all_confidence_summary, confidence_summary)
     
     tunings = readRDS(paste0('model/tunings_and_models/', model_category, '/',type,'/all_tunings_', response, '.rds'))
     all_tunings = bind_rows(all_tunings,tunings)
     
-    params = c(response, gbm.perf(model, method = "cv", plot.it = FALSE), model$params$interaction_depth, model$params$min_num_obs_in_node, model$params$shrinkage, model$params$bag_fraction, avg_buckets_error, median_buckets_error, min_buckets_error, max_buckets_error, precision, recall, mean(test_df[[response]], na.rm = TRUE))
+    params = data.frame(response, trees = gbm.perf(model, method = "cv", plot.it = FALSE), interdepth = model$params$interaction_depth, minobs = model$params$min_num_obs_in_node, shrink = model$params$shrinkage, bag = model$params$bag_fraction, pct_high, pct_high_medium, precision, recall, prevalence = mean(test_df[[response]], na.rm = TRUE))
     optimals = rbind(optimals, params)
     
     
@@ -49,24 +54,19 @@ assess_model_results = function(test, type, model_category, responses)
       abnormal_top_20[[response]] = top20
     }
     
-    if(type == 'full')
-    {
-      writeLines(paste(summary(model, plot.it = FALSE) %>% filter(rel_inf == 0) %>% select(var) %>% pull(), collapse = ","),
-                 paste0('model/unimportant_vars/',response,"_unimportant_vars_string.txt"))
-    }
-    colnames(optimals) = c('response', 'tree', 'interdepth', 'min obs', 'shrink', 'bag', 'avg_buckets_err', 'med_buckets_err', 'min_buckets_err','max_buckets_err', 'precision', 'recall', 'prevalence')
-    
-    # print(kable(optimals, caption = paste('Passing: Optimal tunings by response on test dataset:', p), row.names = FALSE))
-    # print(kable(t(all_confidence), caption = paste('Passing: Model Probability Confidence by Prediction Bins:', p)))
-    # overall_avg_error = c(overall_avg_error, mean(as.numeric(t(all_confidence)["Avg",]), na.rm = TRUE))
-    # overall_pct_high = c(overall_pct_high,mean(all_confidence[1:8,] == 'High'))
-    # overall_pct_not_low = c(overall_pct_not_low, mean(all_confidence[1:8,]  == 'High' | all_confidence[1:8,] == 'Medium'))
-    # overall_pct_non_missing = c(overall_pct_non_missing, mean(all_confidence[1:8,] != 'No Data'))
+    # if(type == 'full')
+    # {
+    #   writeLines(paste(summary(model, plot.it = FALSE) %>% filter(rel_inf == 0) %>% select(var) %>% pull(), collapse = ","),
+    #              paste0('model/unimportant_vars/',response,"_unimportant_vars_string.txt"))
+    # }
+ 
   }
   
   return(list(all_confidence, optimals, all_tunings, abnormal_top_20))
 }
 
+
+#expected value assessment:
 
 
 

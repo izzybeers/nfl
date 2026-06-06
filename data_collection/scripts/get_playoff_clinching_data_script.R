@@ -2,12 +2,59 @@
 library(purrr)
 library(dplyr)
 library(rvest)
+library(chromote)
 library(furrr)
 
 
 source('data_collection/scripts/global.R')
-team_abbr = team_lookup_table %>% select(TV_abbr, Conference)
+team_abbr = team_lookup_table %>% select(NFLReadr_Team_Abbr, Conference)
 plan(multisession, workers = 4)
+
+get_html_content = function(url, max_retries = 3, skip_to_chromote = FALSE, extra_wait = 0) {
+  retries = 0
+  
+  for (i in 1:max_retries) {
+    if(!skip_to_chromote)
+    {
+      try_result = try({
+        session <- session(url, user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/113.0.0.0 Safari/537.36"))
+        page <- read_html(session)
+        if(length(html_children(page)) > 0)
+        {
+          return(page)  # Success — exit function
+        } else {
+          page = NULL
+          stop("Empty content detected — triggering fallback to Chromote")
+        }
+      }, silent = TRUE)
+    }
+    
+    # If the above failed, try with Chromote
+    try_result = try({
+      message("Using chromote")
+      b <- ChromoteSession$new()
+      b$Page$navigate(url)
+      Sys.sleep(extra_wait) #if certain sites take a few more seconds to load before pulling result, like nfl's site
+      result <- b$Runtime$evaluate("document.documentElement.outerHTML")
+      html_content <- result$result$value
+      page = read_html(html_content)
+      
+      return(page)  # Success — exit function
+    })
+    
+    if (!is.null(try_result)) return(try_result)
+    
+    # Only wait if both methods failed
+    wait_time <- runif(1, 2, 4)
+    message(paste("Both methods failed. Waiting", round(wait_time, 1), "seconds before retrying..."))
+    Sys.sleep(wait_time)
+  }
+  
+  
+  stop(paste(max_retries, "attempts failed to retrieve", url))
+  
+}
+
 
 get_playoff_clinching_data = function(min_year, max_year, wk = NULL, predict_mode = FALSE)
 {
@@ -34,7 +81,7 @@ get_playoff_clinching_data = function(min_year, max_year, wk = NULL, predict_mod
       )
       
       print(playoff_clinching_html)
-      if(class(playoff_clinching_html) != 'try-error' && !is.null(playoff_clinching_html) && !any(playoff_clinching_html %>% html_nodes('p') %>% html_text(trim = TRUE) == 'Page not found :('))
+      if(any(class(playoff_clinching_html) != 'try-error') && !is.null(playoff_clinching_html) && !any(playoff_clinching_html %>% html_nodes('p') %>% html_text(trim = TRUE) == 'Page not found :('))
       {
         print('entered here')
         
@@ -248,13 +295,12 @@ get_playoff_clinching_data = function(min_year, max_year, wk = NULL, predict_mod
       playoff_clinching_all_weeks = data.frame(Season = y, Week = wk, Team = NA, Div_Ranking = as.numeric(NA), Div_Pct_Wins = as.numeric(NA), Already_Clinched_Playoff = as.numeric(NA), Already_Clinched_Division = as.numeric(NA), Already_Clinched_Seed1 = as.numeric(NA), Already_Eliminated = as.numeric(NA), Already_Eliminated_Division = as.numeric(NA), playoffs_at_stake = as.numeric(NA), elimination_at_stake = as.numeric(NA))
     }
     
-    return(playoff_clinching_all_weeks)
+    return(playoff_clinching_all_weeks %>% mutate(Team = ifelse(Team == 'LAR', 'LA', Team)))
   }
   
   
   full_playoff_clinching_table_all_years = bind_rows(future_map(.x = (min_year:max_year),
                                                                 .f = playoff_data_by_year))
-  
   
   
   return(full_playoff_clinching_table_all_years)

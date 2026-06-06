@@ -11,9 +11,6 @@ source('data_collection/scripts/global.R')
 
 model_manual_remove = c('min_year', 'max_year')
 
-
-
-
 # Set up parallel plan (you can change multisession to multicore depending on OS)
 plan(multisession, workers = 4)  # Use 4 cores; adjust to what your system can handle
 

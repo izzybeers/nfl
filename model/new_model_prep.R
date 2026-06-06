@@ -1,0 +1,397 @@
+source('model/scripts/nfl_model_functions.R')
+library(dplyr)
+library(stringr)
+library(scorecard)
+library(gbm)
+library(ranger)
+library(tidyr)
+
+data_to_prep = readRDS('model/data/receiving_preliminary_data.rds')
+column_categories = readRDS('model/data/receiving_data_column_categories.rds')
+split_method = 'random'
+
+passing_numbers = c(150, 180, 210, 240, 270, 300, 330, 360)
+rushing_numbers = c(25, 40, 60, 80, 100, 120, 140)
+receiving_numbers = c(25, 40, 60, 80, 100, 120, 140)
+numbers = receiving_numbers
+raw_response_var = 'Receiving_Yds'
+
+this_or_that = data.frame(cbind(option1 = c('draft_round', 'Grass_Type', 'Roof', 'age'),
+                                option2 = c('draft_pick', 'Familiar_Grass_Type', 'Familiar_Roof_Type', 'Years_Since_Drafted')))
+
+create_data_with_response_variables = function(df, numbers, response_var) {
+  for(n in numbers)
+  {
+    df  = df %>% mutate(!!paste0(response_var, '_', n) := ifelse(!!sym(response_var) >= n, 1, 0))
+  }
+  return(df)
+}
+
+
+data_to_prep = data_to_prep %>%
+  mutate(across(where(is.numeric), ~ifelse(is.infinite(.x), NA, .x)))
+
+
+
+#clean up the lag variable mistakes:
+setdiff(colnames(data_to_prep)[str_detect(colnames(data_to_prep), 'Lag')],
+        colnames(data_to_prep)[str_detect(colnames(data_to_prep), 'Lag') & str_detect(colnames(data_to_prep), 'Min|Max|Last3|Avg|Median|Cumulative|SD')])
+
+dim(data_to_prep)
+mistake_columns = colnames(data_to_prep)[str_detect(colnames(data_to_prep), 'Lag') & str_detect(colnames(data_to_prep), 'Min|Max|Last3|Avg|Median|Cumulative|SD')]
+data_to_prep = data_to_prep %>% select(-any_of(mistake_columns))
+dim(data_to_prep)
+
+for(i in 1:length(column_categories))
+{
+  column_categories[[i]] = column_categories[[i]][!(column_categories[[i]] %in% mistake_columns)]
+}
+
+
+avg_columns = colnames(data_to_prep)[str_detect(tolower(colnames(data_to_prep)), 'avg')]
+mean_columns = colnames(data_to_prep)[str_detect(tolower(colnames(data_to_prep)), 'mean')]
+sd_columns = colnames(data_to_prep)[str_detect(tolower(colnames(data_to_prep)), 'sd')]
+
+overlap_sd = sd_columns[which(gsub('sd_|_sd|SD_|_SD','', sd_columns) %in% c(gsub('_mean|mean_|_Mean|Mean_', '', mean_columns), gsub('_avg|avg_|Avg_|_Avg', '', avg_columns)))]
+
+
+for(sd_col in overlap_sd)
+{
+  if(gsub('sd_|_sd|SD_|_SD','', sd_col) %in% c(gsub('_mean|mean_|_Mean|Mean_', '', mean_columns)))
+  {
+    column_name = mean_columns[which(gsub('_mean|mean_|_Mean|Mean_', '', mean_columns) == gsub('sd_|_sd|SD_|_SD','', sd_col))]
+  } else if (gsub('sd_|_sd|SD_|_SD','', sd_col) %in% c(gsub('_avg|avg_|Avg_|_Avg', '', avg_columns))) {
+    column_name = avg_columns[which(gsub('_avg|avg_|Avg_|_Avg', '', avg_columns) == gsub('sd_|_sd|SD_|_SD','', sd_col))]
+  } else {
+    column_name = NA
+  }
+  cv_col_name = paste0('CV_',gsub('sd_|_sd|SD_|_SD','', sd_col))
+  data_to_prep = data_to_prep %>% mutate(!!cv_col_name := !!sym(sd_col)/!!sym(column_name))
+}
+
+data_to_prep = data_to_prep %>%
+  mutate(across(where(is.numeric), ~ifelse(is.infinite(.x), NA, .x)))
+
+all_cv_columns = colnames(data_to_prep)[str_detect(colnames(data_to_prep), 'CV')]
+player_historical_cv_columns = all_cv_columns[(str_detect(tolower(all_cv_columns), '(sum_)|(pct_)|(avg_)|(median_)|(sd_)|(max_)|(min_)|(cumulative_)|(cv_)|(per_)|(seasons_ago)|(last_season)|(last3)|(lag)[0-9]') | str_detect(tolower(all_cv_columns), '(_sum)|(_avg)|(_pct)|(_median)|(_sd)|(_max)|(_min)|(_cumulative)(cv_)|')) & (!str_detect(all_cv_columns, '(Opp)|(Team)|(Rank)|(Pct_Team)'))]
+player_historical_cv_current_season = player_historical_cv_columns[-which(str_detect(player_historical_cv_columns, '(Last_Season)|(Two_Seasons_Ago)'))]
+player_historical_cv_recent_seasons = player_historical_cv_columns[which(str_detect(player_historical_cv_columns, '(Last_Season)|(Two_Seasons_Ago)'))]
+
+team_historical_cv_columns = all_cv_columns[str_detect(tolower(all_cv_columns), 'team') & !str_detect(tolower(all_cv_columns), 'pct_team') & (str_detect(tolower(all_cv_columns), '(sum_)|(pct_)|(rank_)|(avg_)|(median_)|(sd_)|(max_)|(min_)|(cumulative_)|(cv_)|(per_)|(seasons_ago)|(last_season)|(last3)|(lag)[0-9]') | str_detect(tolower(all_cv_columns), '(_sum)|(_avg)|(_pct)|(rank_)|(_median)|(_sd)|(_max)|(_min)|(_cumulative)(cv_)|'))]
+team_historical_cv_current_season = team_historical_cv_columns[-which(str_detect(team_historical_cv_columns, '(Last_Season)|(Two_Seasons_Ago)'))]
+team_historical_cv_recent_seasons = team_historical_cv_columns[which(str_detect(team_historical_cv_columns, '(Last_Season)|(Two_Seasons_Ago)'))]
+
+opp_historical_cv_columns = all_cv_columns[str_detect(tolower(all_cv_columns), 'opp') & (str_detect(tolower(all_cv_columns), '(sum_)|(pct_)|(rank_)|(avg_)|(median_)|(sd_)|(max_)|(min_)|(cumulative_)|(cv_)|(per_)|(seasons_ago)|(last_season)|(last3)|(lag)[0-9]') | str_detect(tolower(all_cv_columns), '(_sum)|(_avg)|(rank_)|(_pct)|(_median)|(_sd)|(_max)|(_min)|(_cumulative)(cv_)|'))]
+opp_historical_cv_current_season = opp_historical_cv_columns[-which(str_detect(opp_historical_cv_columns, '(Last_Season)|(Two_Seasons_Ago)'))]
+opp_historical_cv_recent_seasons = opp_historical_cv_columns[which(str_detect(opp_historical_cv_columns, '(Last_Season)|(Two_Seasons_Ago)'))]
+
+column_categories[[which(str_detect(names(column_categories), 'player_current_season'))]] = c(column_categories[[which(str_detect(names(column_categories), 'player_current_season'))]], player_historical_cv_current_season)
+column_categories[[which(str_detect(names(column_categories), 'player_recent_seasons'))]] = c(column_categories[[which(str_detect(names(column_categories), 'player_recent_seasons'))]], player_historical_cv_recent_seasons)
+column_categories[[which(str_detect(names(column_categories), 'team_current_season'))]]= c(column_categories[[which(str_detect(names(column_categories), 'team_current_season'))]], team_historical_cv_current_season)
+column_categories[[which(str_detect(names(column_categories), 'team_recent_seasons'))]] = c(column_categories[[which(str_detect(names(column_categories), 'team_recent_seasons'))]], team_historical_cv_recent_seasons)
+column_categories[[which(str_detect(names(column_categories), 'opp_current_season'))]] = c(column_categories[[which(str_detect(names(column_categories), 'opp_current_season'))]], opp_historical_cv_current_season)
+column_categories[[which(str_detect(names(column_categories), 'opp_recent_seasons'))]] = c(column_categories[[which(str_detect(names(column_categories), 'opp_recent_seasons'))]], opp_historical_cv_recent_seasons)
+
+
+if(split_method == 'random')
+{
+  set.seed(1)
+  train_indices = sample(1:nrow(data_to_prep), 0.6*nrow(data_to_prep) ,replace = FALSE)
+  
+  remaining_indices = setdiff(1:nrow(data_to_prep), train_indices)
+  test_indices = sample(remaining_indices, 0.5*length(remaining_indices))
+  final_test_indices = setdiff(remaining_indices, test_indices) #for the final logistic regression
+  
+  train = data_to_prep[train_indices,]
+  test = data_to_prep[test_indices,]
+  final_test = data_to_prep[final_test_indices,]
+}
+
+train = create_data_with_response_variables(train, numbers, response_var = raw_response_var)
+test = create_data_with_response_variables(test, numbers, response_var = raw_response_var)
+final_test = create_data_with_response_variables(final_test, numbers, response_var = raw_response_var)
+
+#fixcolumncategories having dups for the snap columns
+
+
+
+
+#categorical IV
+
+
+#numeric (non-stats) IV
+
+
+#stats IV
+
+#3 categories: opportunity, production, efficiency
+#timeframe: This season, last 3, last season, 2 seasons ago
+#scope: Player stats, player rank, team stats, team rank, opp stats, opp rank.
+
+
+column_categories_df = categorize_stats_fields(column_categories) %>% distinct()
+
+
+
+#information value:
+
+exclude_from_information_value = c('player_id', 'names', 'Week', 'Gtm', 'Season', 'Date', 'min_year', 'max_year', 'Time', 'Team', 'Opp', 'current_team', 'birthday')
+
+
+list_training_data = list()
+list_test_data = list()
+list_final_test_data = list()
+
+for(r in response_var)
+{
+  
+  this_response_df = train %>% select(-any_of(setdiff(colnames(train)[which(str_detect(colnames(train), paste0(gsub('_[0-9]+','',r), '_[0-9]+')))], r)))
+  this_response_df_test = test %>% select(-any_of(setdiff(colnames(test)[which(str_detect(colnames(test), paste0(gsub('_[0-9]+','',r), '_[0-9]+')))],r)))
+  this_response_df_final_test = final_test %>% select(-any_of(setdiff(colnames(final_test)[which(str_detect(colnames(final_test), paste0(gsub('_[0-9]+','',r), '_[0-9]+')))],r)))
+                                                     
+  print(r)
+  
+  for(early_season in c(0,1))
+  {
+    if(early_season == 0)
+    {
+      print('main season')
+      this_season_df = this_response_df %>% filter(Week >= 4)
+      this_season_df_test = this_response_df_test %>% filter(Week >= 4)
+      this_season_df_final_test = this_response_df_final_test %>% filter(Week >= 4)
+    } else {
+      print('early season')
+      this_season_df = this_response_df %>% filter(Week <= 3)
+      this_season_df_test = this_response_df_test %>% filter(Week <= 3)
+      this_season_df_final_test = this_response_df_final_test %>% filter(Week <= 3)
+    }
+    for(rookie in c(0,1))
+    {
+      final_stats_fields_df_gbm = rbind()
+      final_stats_fields_df_rf = rbind()
+      if(rookie == 1)
+      {
+        print('rookie')
+        this_df = this_season_df %>% filter(Years_Since_Drafted == 0)
+        this_df_test = this_season_df_test %>% filter(Years_Since_Drafted == 0)
+        this_df_final_test = this_season_df_final_test %>% filter(Years_Since_Drafted == 0)
+      } else {
+        print('non rookie')
+        this_df = this_season_df %>% filter(Years_Since_Drafted > 0)
+        this_df_test = this_season_df_test %>% filter(Years_Since_Drafted > 0)
+        this_df_final_test = this_season_df_final_test %>% filter(Years_Since_Drafted > 0)
+      }
+      #for categorical fields and non-stat numeric fields:
+      ivs_and_bins = create_iv_tables(df = this_df, response_var = r, var_list = setdiff(colnames(this_df), c(exclude_from_information_value, column_categories_df$Stat, colnames(this_df)[which(str_detect(colnames(this_df), gsub('_[0-9]+','',r)))])), column_categories = column_categories, specific_bins = TRUE)
+      ivs = ivs_and_bins[[1]]
+      bins = ivs_and_bins[[2]]
+      this_or_that_table = this_or_that_results(ivs = ivs, this_or_that = this_or_that) %>%
+        mutate(NotSelected = ifelse(option1 == decision, option2, option1))
+      
+      ivs = ivs %>% filter(!(Variable %in% this_or_that_table$NotSelected))
+      bins = bins %>% filter(!(Variable %in% this_or_that_table$NotSelected))
+      
+      fields_to_use_bins_gbm = bins %>% filter(Predictive_Power != 'None' & class =='character' & pct_missing < 0.5 & unique_vals > 10) %>% pull(Variable) %>% unique()
+      fields_to_use_as_is_gbm =  bins %>% filter(Predictive_Power != 'None'  & !(class =='character' & pct_missing < 0.5 & unique_vals > 10)) %>% pull(Variable) %>% unique()
+      fields_to_use_bins_rf = bins %>% filter(Predictive_Power != 'None' & class =='character' & pct_missing < 0.05 & unique_vals > 10) %>% pull(Variable) %>% unique()
+      fields_to_use_as_is_rf =  bins %>% filter(Predictive_Power != 'None'  & !(class =='character' & pct_missing < 0.05 & unique_vals > 10)) %>% pull(Variable) %>% unique()
+      
+      gbm_this_df = this_df %>% select(r, Season, Week, player_id, Team, Opp, Date, column_categories_df$Stat, fields_to_use_bins_gbm, fields_to_use_as_is_gbm)
+      gbm_this_df_test = this_df_test %>% select(r, Season, Week, player_id, Team, Opp, Date, column_categories_df$Stat, fields_to_use_bins_gbm, fields_to_use_as_is_gbm)
+      gbm_this_df_final_test = this_df_final_test %>% select(r, Season, Week, player_id, Team, Opp, Date, column_categories_df$Stat, fields_to_use_bins_gbm, fields_to_use_as_is_gbm)
+      rf_this_df = this_df %>% select(r, Season, Week, player_id, Team, Opp, Date, column_categories_df$Stat, fields_to_use_bins_rf, fields_to_use_as_is_rf)
+      rf_this_df_test = this_df_test %>% select(r, Season, Week, player_id, Team, Opp, Date, column_categories_df$Stat, fields_to_use_bins_rf, fields_to_use_as_is_rf)
+      rf_this_df_final_test = this_df_final_test %>% select(r, Season, Week, player_id, Team, Opp, Date, column_categories_df$Stat, fields_to_use_bins_rf, fields_to_use_as_is_rf)
+      
+      if(length(fields_to_use_bins_gbm) > 0)
+      {
+        all_bins_gbm = get_specific_iv_table(df = gbm_this_df,
+                                         iv_table = ivs %>% filter(Variable %in% fields_to_use_bins_gbm),
+                                         bin_table = bins %>% filter(Variable %in% fields_to_use_bins_gbm),
+                                         predictive_power_choice = 'Significant',
+                                         column_categories = column_categories,
+                                         bin_iv_limit = 0.01) %>% arrange(Variable, Response) %>% select(Variable, Bin, Response, display, Bin_IV, Bin_Count, specific_count, Pos_Prob, overall_mean_response)
+        gbm_this_df = iv_to_dummy(df = gbm_this_df, bins = all_bins, r = r)
+        gbm_this_df_test = iv_to_dummy(df = gbm_this_df_test, bins = all_bins, r = r)
+        gbm_this_df_final_test = iv_to_dummy(df = gbm_this_df_final_test, bins = all_bins, r = r)
+      }
+      
+      if(length(fields_to_use_bins_rf) > 0)
+      {
+        all_bins_rf = get_specific_iv_table(df = rf_this_df,
+                                             iv_table = ivs %>% filter(Variable %in% fields_to_use_bins_rf),
+                                             bin_table = bins %>% filter(Variable %in% fields_to_use_bins_rf),
+                                             predictive_power_choice = 'Significant',
+                                             column_categories = column_categories,
+                                             bin_iv_limit = 0.01) %>% arrange(Variable, Response) %>% select(Variable, Bin, Response, display, Bin_IV, Bin_Count, specific_count, Pos_Prob, overall_mean_response)
+        rf_this_df = iv_to_dummy(df = rf_this_df, bins = all_bins, r = r)
+        rf_this_df_test = iv_to_dummy(df = rf_this_df_test, bins = all_bins, r = r)
+        rf_this_df_final_test = iv_to_dummy(df = rf_this_df_final_test, bins = all_bins, r = r)
+      }
+      
+      
+      for(scope in unique(column_categories_df$scope))
+      {
+        print(scope)
+        for(tf in unique(column_categories_df$Timeframe[column_categories_df$scope == scope]))
+        {
+          print(tf)
+          iv_tables = create_iv_tables(this_df, response_var = r, var_list = column_categories_df$Stat[column_categories_df$scope == scope & column_categories_df$Timeframe == tf],
+                                          column_categories, specific_bins = FALSE)
+          
+          column_categories_player_stats_with_iv = column_categories_df %>%
+            inner_join(iv_tables[[1]] %>% distinct() %>% select(Variable, Total_IV, Predictive_Power, pct_missing), join_by('Stat' == 'Variable')) %>%
+            filter(Predictive_Power != 'None')
+          
+          if(nrow(column_categories_player_stats_with_iv) > 0)
+          {
+            stats_fields_gbm = trim_columns_by_iv_correlation(columns_df = column_categories_player_stats_with_iv %>% filter(pct_missing < 0.5), train_df = gbm_this_df, num_winners_per_category = 5)
+            
+            if(!is.null(stats_fields_gbm) && nrow(stats_fields_gbm) > 0)
+            {
+              final_stats_fields_df_gbm = rbind(final_stats_fields_df_gbm,
+                                                stats_fields_gbm %>% mutate(Response = r, Scope = scope, Timeframe = tf))
+            }
+            stats_fields_rf = trim_columns_by_iv_correlation(columns_df = column_categories_player_stats_with_iv %>% filter(pct_missing < 0.1), train_df = rf_this_df, num_winners_per_category = 5)
+            
+            if(!is.null(stats_fields_rf) && nrow(stats_fields_rf) > 0)
+            {
+              final_stats_fields_df_rf = rbind(final_stats_fields_df_rf,
+                                              stats_fields_rf %>% mutate(Response = r, Scope = scope, Timeframe = tf))
+            }
+          }
+        }
+      } 
+      #handle test data:
+      
+      
+      list_training_data[[paste0(r,'_gbm_',
+                                 ifelse(early_season == 1, '_EarlySeason', '_MainSeason'),
+                                 ifelse(rookie == 1, '_Rookie', ''))]] = gbm_this_df %>% select(-any_of(c(setdiff(column_categories_df$Stat, final_stats_fields_df_gbm$Stat), setdiff(exclude_from_information_value, c('Season', 'Week', 'player_id', 'Team', 'Opp', 'Date'))))) 
+      list_test_data[[paste0(r,'_gbm_',
+                             ifelse(early_season == 1, '_EarlySeason', '_MainSeason'),
+                             ifelse(rookie == 1, '_Rookie', ''))]] = gbm_this_df_test %>% select(-any_of(c(setdiff(column_categories_df$Stat, final_stats_fields_df_gbm$Stat), setdiff(exclude_from_information_value, c('Season', 'Week', 'player_id', 'Team', 'Opp', 'Date'))))) 
+      list_final_test_data[[paste0(r,'_gbm_',
+                                   ifelse(early_season == 1, '_EarlySeason', '_MainSeason'),
+                                   ifelse(rookie == 1, '_Rookie', ''))]] = gbm_this_df_final_test %>% select(-any_of(c(setdiff(column_categories_df$Stat, final_stats_fields_df_gbm$Stat), setdiff(exclude_from_information_value, c('Season', 'Week', 'player_id', 'Team', 'Opp', 'Date'))))) 
+      list_training_data[[paste0(r,'_rf_',
+                                 ifelse(early_season == 1, '_EarlySeason', '_MainSeason'),
+                                 ifelse(rookie == 1, '_Rookie', ''))]] = rf_this_df %>% select(-any_of(c(setdiff(column_categories_df$Stat, final_stats_fields_df_rf$Stat), setdiff(exclude_from_information_value, c('Season', 'Week', 'player_id', 'Team', 'Opp', 'Date'))))) 
+      list_test_data[[paste0(r,'_rf_',
+                             ifelse(early_season == 1, '_EarlySeason', '_MainSeason'),
+                             ifelse(rookie == 1, '_Rookie', ''))]] = rf_this_df_test %>% select(-any_of(c(setdiff(column_categories_df$Stat, final_stats_fields_df_rf$Stat), setdiff(exclude_from_information_value, c('Season', 'Week', 'player_id', 'Team', 'Opp', 'Date'))))) 
+      list_final_test_data[[paste0(r,'_rf_',
+                                   ifelse(early_season == 1, '_EarlySeason', '_MainSeason'),
+                                   ifelse(rookie == 1, '_Rookie', ''))]] = rf_this_df_final_test %>% select(-any_of(c(setdiff(column_categories_df$Stat, final_stats_fields_df_rf$Stat), setdiff(exclude_from_information_value, c('Season', 'Week', 'player_id', 'Team', 'Opp', 'Date'))))) 
+    }
+  }
+}
+
+
+all_results = list()
+
+t_per_s = c(1000, 300)
+i_range = c(2,5,8)
+s_range = c(0.01,0.05)
+n_range = 10
+b_range = c(0.3, 0.5, 0.7)
+
+for(i in 1:length(list_training_data))
+{
+  
+  sample_train = list_training_data[[i]]
+  sample_test = list_test_data[[i]]
+  sample_final_test = list_final_test_data[[i]]
+  
+  if(str_detect(names(list_training_data)[i], 'gbm_'))
+  {
+    t1 = Sys.time()
+    res = run_gbm(
+      df = sample_train %>% select(-Week, -Season, -player_id, -Team, -Opp, -Date),
+      response = r,
+      model_name = 'Receiving_Yds',
+      path = NULL,
+      t_per_s = t_per_s,
+      i_range = i_range,
+      s_range = s_range,
+      n_range = n_range,
+      b_range = b_range
+    )
+    Sys.time() - t1
+  
+    tuning = res[[1]]
+    best_model = res[[2]]
+    best_trees = tuning$trees[which.max(tuning$pct_high_medium)]
+    
+    test_results = get_prediction_data_metrics(df = sample_test, model = best_model, type = 'gbm', tree = best_trees, response = r)
+    
+    all_results[[names(list_training_data)[i]]] = test_results
+  } else if (str_detect(names(list_training_data)[i], '_rf_'))
+  {
+    #RF:
+    
+    t1 = Sys.time()
+    mtry_starting_point = round(sqrt(ncol(sample_train) - 5))
+    res_rf = run_rf(
+      df = sample_train %>% filter(Week > 1) %>% drop_na() %>% select(-Week, -Season, -player_id, -Team, -Opp, -Date),
+      response = r,
+      model_name = 'Receiving_Yds',
+      path = NULL,
+      t = 1000,
+      mtry = unique(c(round(0.67*mtry_starting_point), mtry_starting_point, round(1.5*mtry_starting_point), 2*mtry_starting_point)),
+      min_node_size = c(5,10,15),
+      sample_fraction = c(0.6, 0.8, 1)
+    )
+    Sys.time() - t1
+    
+    tuning_rf = res_rf[[1]]
+    best_model_rf = res_rf[[2]]
+    
+    test_results_rf = get_prediction_data_metrics(df = sample_test %>% filter(Week > 1) %>% drop_na(), model = best_model_rf, tree = NULL, type = 'rf', response = r)
+    
+    all_results[[names(list_training_data)[i]]] = test_results_rf
+  }
+  
+  
+  
+}
+
+
+#step 0 (prep, cleanup): clean up the fields. like for opp, we have things like Opp_Last_Season_Rank_Defense_Total_Yards_Allowed_Season_median_Allowed which make no sense.
+#fix the team and opp fields, and then fix.
+
+#step 1:
+#Derive a CV column: sd/mean.
+
+#step 2:  for categorical fields, determine which ones have high cardinality and do IV binning for those, otherwise leave them as is. For low cardinality, run IV on them
+#to see if they are predictive at all, and then leave them in as raw values. Continue to use the This-or-That analysis.
+
+#step 3: IV for numeric fields: for all numeric fields, run information value analysis, remove the ones with low IV, and keep the rest as raw scores.
+#for fields that are mostly 1s and 0s, turn them into a binary flag.
+#for clumpy numeric fields like draft round, keep the binning.
+
+#step 4: Expand the This-or-That concept to work for stat types. For each stat that survived step 3, ctegorize each stat into a timeline, scope, and measurement type.
+#For each timeline:
+#This season: Avg, Median, Min, Max, SD.
+#Last 3: Avg, Median, Min, Max, SD.
+#Last season: Avg, Median, Min, Max, SD.
+#2 seasons ago: Avg, Median, Min, Max, SD.
+#Then scope: Player stats, player rank, team stats, team rank, opp stats, opp rank.
+#Measurement type:
+#Opportunity targets, rushing attempts, snap, etc.
+#Production yards, touchdowns, receptions, 1st downs, etc.
+#Efficiency: yards per target, yards per attempt
+
+#step 5: do an IV tournament for each grouping of timeline/scope/measurement type. Determine how many winners should be in each one depending on how much variety there is.
+#for example, you might need 2 for production when it comes to yardage/completions and touchdowns, 2 different things. assess when seeing the data.
+#Then for each scope/timeline combo, look at the winners for measurement type, adn compare correlations. If the correlations between the production metrics and opportunity
+#metrics, for example, are over 0.90, consider cutting. Prioritize the hierarchy opportunity > efficiency > production if the IVs are close, but if production, for example,
+#has a much higher IV, then prioritize that. use the hierarchy if IVs are close.
+
+#step 6: try random forest and xgboost. for each model, choose between xgboost and gbm, and then include a rf prediction and a gradient prediction (gbm or xgboost).
+#Run these 2 values into a logistic regression model to predict actual probability (to give a final probability to help with overestimating.)
+#have 3 datasets: train1, train2, and test. train1 goes into gbm/rf, train2 goes into logistic, and test is the final test.
+#use rBayesianOptimization for faster tuning.
+
+#after:
+#pull in the betting lines scraped data.

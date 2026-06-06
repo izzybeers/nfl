@@ -24,38 +24,50 @@ touchdown_data_this_or_that = data.frame(cbind(option1 = c('draft_round', 'Grass
 
 model_prep = function(passing_data, rushing_data, receiving_data, touchdown_data,
                       passing_data_column_categories, rushing_data_column_categories, receiving_data_column_categories, touchdown_data_column_categories,
-                      train_test_split = TRUE, train_mode = TRUE, bin_iv_limit = 0.01) #train or prediction
+                      train_test_split = TRUE, split_by_year = NULL, train_mode = TRUE, bin_iv_limit = 0.01) #train or prediction
 {
 
   if(train_test_split == TRUE)
   {
-    set.seed(123)
-    passing_indices_positive_shuffled = sample(which(passing_data$Passing_Yds >= 300), 0.8*sum(passing_data$Passing_Yds >= 300))
-    passing_indices_negative_shuffled = sample(which(passing_data$Passing_Yds < 300), 0.8*sum(passing_data$Passing_Yds < 300))
-    passing_train_indices = c(passing_indices_positive_shuffled, passing_indices_negative_shuffled)
-    passing_data_train = passing_data[passing_train_indices,]
-    passing_data_test = passing_data[-passing_train_indices,]
-    
-    set.seed(123)
-    rushing_indices_positive_shuffled = sample(which(rushing_data$Rushing_Yds >= 120), 0.8*sum(rushing_data$Rushing_Yds >= 120))
-    rushing_indices_negative_shuffled = sample(which(rushing_data$Rushing_Yds < 120), 0.8*sum(rushing_data$Rushing_Yds < 120))
-    rushing_train_indices = c(rushing_indices_positive_shuffled, rushing_indices_negative_shuffled)
-    rushing_data_train = rushing_data[rushing_train_indices,]
-    rushing_data_test = rushing_data[-rushing_train_indices,]
-    
-    set.seed(123)
-    receiving_indices_positive_shuffled = sample(which(receiving_data$Receiving_Yds >= 120), 0.8*sum(receiving_data$Receiving_Yds >= 120))
-    receiving_indices_negative_shuffled = sample(which(receiving_data$Receiving_Yds < 120), 0.8*sum(receiving_data$Receiving_Yds < 120))
-    receiving_train_indices = c(receiving_indices_positive_shuffled, receiving_indices_negative_shuffled)
-    receiving_data_train = receiving_data[receiving_train_indices,]
-    receiving_data_test = receiving_data[-receiving_train_indices,]
-    
-    set.seed(123)
-    touchdown_indices_positive_shuffled = sample(which(touchdown_data$Total_Touchdowns > 0), 0.8*sum(touchdown_data$Total_Touchdowns > 0))
-    touchdown_indices_negative_shuffled = sample(which(touchdown_data$Total_Touchdowns == 0), 0.8*sum(touchdown_data$Total_Touchdowns == 0))
-    touchdown_train_indices = c(touchdown_indices_positive_shuffled, touchdown_indices_negative_shuffled)
-    touchdown_data_train = touchdown_data[touchdown_train_indices,]
-    touchdown_data_test = touchdown_data[-touchdown_train_indices,]
+    if(!is.null(split_by_year))
+    {
+      set.seed(123)
+      passing_indices_positive_shuffled = sample(which(passing_data$Passing_Yds >= 300), 0.8*sum(passing_data$Passing_Yds >= 300))
+      passing_indices_negative_shuffled = sample(which(passing_data$Passing_Yds < 300), 0.8*sum(passing_data$Passing_Yds < 300))
+      passing_train_indices = c(passing_indices_positive_shuffled, passing_indices_negative_shuffled)
+      passing_data_train = passing_data[passing_train_indices,]
+      passing_data_test = passing_data[-passing_train_indices,]
+      
+      set.seed(123)
+      rushing_indices_positive_shuffled = sample(which(rushing_data$Rushing_Yds >= 120), 0.8*sum(rushing_data$Rushing_Yds >= 120))
+      rushing_indices_negative_shuffled = sample(which(rushing_data$Rushing_Yds < 120), 0.8*sum(rushing_data$Rushing_Yds < 120))
+      rushing_train_indices = c(rushing_indices_positive_shuffled, rushing_indices_negative_shuffled)
+      rushing_data_train = rushing_data[rushing_train_indices,]
+      rushing_data_test = rushing_data[-rushing_train_indices,]
+      
+      set.seed(123)
+      receiving_indices_positive_shuffled = sample(which(receiving_data$Receiving_Yds >= 120), 0.8*sum(receiving_data$Receiving_Yds >= 120))
+      receiving_indices_negative_shuffled = sample(which(receiving_data$Receiving_Yds < 120), 0.8*sum(receiving_data$Receiving_Yds < 120))
+      receiving_train_indices = c(receiving_indices_positive_shuffled, receiving_indices_negative_shuffled)
+      receiving_data_train = receiving_data[receiving_train_indices,]
+      receiving_data_test = receiving_data[-receiving_train_indices,]
+      
+      set.seed(123)
+      touchdown_indices_positive_shuffled = sample(which(touchdown_data$Total_Touchdowns > 0), 0.8*sum(touchdown_data$Total_Touchdowns > 0))
+      touchdown_indices_negative_shuffled = sample(which(touchdown_data$Total_Touchdowns == 0), 0.8*sum(touchdown_data$Total_Touchdowns == 0))
+      touchdown_train_indices = c(touchdown_indices_positive_shuffled, touchdown_indices_negative_shuffled)
+      touchdown_data_train = touchdown_data[touchdown_train_indices,]
+      touchdown_data_test = touchdown_data[-touchdown_train_indices,]
+    } else {
+      passing_data_train = passing_data %>% filter(Season < split_by_year)
+      passing_data_test = passing_data %>% filter(Season == split_by_year)
+      rushing_data_train = rushing_data %>% filter(Season < split_by_year)
+      rushing_data_test = rushing_data %>% filter(Season == split_by_year)
+      receiving_data_train = receiving_data %>% filter(Season < split_by_year)
+      receiving_data_test = receiving_data %>% filter(Season == split_by_year)
+      touchdown_data_train = touchdown_data %>% filter(Season < split_by_year)
+      touchdown_data_test = touchdown_data %>% filter(Season == split_by_year)
+    }
   } else {
     passing_data_train = passing_data
     passing_data_test = NULL
@@ -120,19 +132,19 @@ model_prep = function(passing_data, rushing_data, receiving_data, touchdown_data
     if(train_mode == TRUE & train_test_split == TRUE)
     {
       passing_information_value_vars = setdiff(unlist(passing_data_column_categories[names(passing_data_column_categories)[!str_detect(tolower(names(passing_data_column_categories)), 'season')]]),
-                                               c('player_id', 'Gtm','Season', 'Date', 'min_year', 'max_year', 'Time', manual_remove))
+                                               c('player_id', 'Week','Season', 'Date', 'min_year', 'max_year', 'Time', manual_remove))
       passing_information_value_vars = passing_information_value_vars[!(sapply(passing_information_value_vars, function(x) length(unique(na.omit(passing_data_train[,x]))) < 2))]
       
       rushing_information_value_vars = setdiff(unlist(rushing_data_column_categories[names(rushing_data_column_categories)[!str_detect(tolower(names(rushing_data_column_categories)), 'season|rank')]]),
-                                               c('player_id', 'Gtm','Season', 'Date', 'min_year', 'max_year', 'Time', manual_remove))
+                                               c('player_id', 'Week','Season', 'Date', 'min_year', 'max_year', 'Time', manual_remove))
       rushing_information_value_vars = rushing_information_value_vars[!(sapply(rushing_information_value_vars, function(x) length(unique(na.omit(rushing_data_train[,x]))) < 2))]
       
       receiving_information_value_vars = setdiff(unlist(receiving_data_column_categories[names(receiving_data_column_categories)[!str_detect(names(receiving_data_column_categories), 'season|rank')]]),
-                                                 c('player_id', 'Gtm','Season', 'Date', 'min_year', 'max_year', 'Time', manual_remove))
+                                                 c('player_id', 'Week','Season', 'Date', 'min_year', 'max_year', 'Time', manual_remove))
       receiving_information_value_vars = receiving_information_value_vars[!(sapply(receiving_information_value_vars, function(x) length(unique(na.omit(receiving_data_train[,x]))) < 2))]
       
       touchdown_information_value_vars = setdiff(unlist(touchdown_data_column_categories[names(touchdown_data_column_categories)[!str_detect(names(touchdown_data_column_categories), 'season|rank')]]),
-                                                 c('player_id', 'Gtm','Season', 'Date', 'min_year', 'max_year', 'Time', manual_remove))
+                                                 c('player_id', 'Week','Season', 'Date', 'min_year', 'max_year', 'Time', manual_remove))
       touchdown_information_value_vars = touchdown_information_value_vars[!(sapply(touchdown_information_value_vars, function(x) length(unique(na.omit(touchdown_data_train[,x]))) < 2))]
     
     
@@ -227,7 +239,6 @@ model_prep = function(passing_data, rushing_data, receiving_data, touchdown_data
     ivs_rushing = readRDS('model/iv_bins/ivs_rushing.rds')
     ivs_receiving  = readRDS('model/iv_bins/ivs_receiving.rds')
     ivs_touchdown = readRDS('model/iv_bins/ivs_touchdown.rds')
-    all_bins_passing = readRDS('model/iv_bins/all_bins_passing.rds')
     all_bins_rushing = readRDS('model/iv_bins/all_bins_rushing.rds')
     all_bins_receiving = readRDS('model/iv_bins/all_bins_receiving.rds')
     all_bins_touchdown = readRDS('model/iv_bins/all_bins_touchdown.rds')

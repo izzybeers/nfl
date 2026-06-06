@@ -111,19 +111,21 @@ Sys.time() - t1
 
 
 model_names = c('passing', 'rushing', 'receiving', 'touchdown')
+response_cols = c('Passing_Yds', 'Rushing_Yds', 'Receiving_Yds', 'Anytime_TD_Scorer')
 response_list = list(passing_response, rushing_response, receiving_response, touchdown_response)
 
 for(i in 1:length(model_names))
 {
   res = assess_model_results(test = readRDS(paste0('model/data/model_ready_',model_names[i],'_test_df.rds')), type = type, model_category = model_names[i],responses = response_list[[i]])
-  confidence = t(res[[1]])
+  confidence = res[[1]]
   optimals = res[[2]]
   all_tunings = res[[3]]
   abnormal_top20_vars = res[[4]]
-  confidence[,names(abnormal_top20_vars)][1:11] = 'Low'
+  confidence$Assessment[which(confidence$Response %in% names(abnormal_top20_vars))] = 'Bad'
   saveRDS(confidence, paste0('model/tunings_and_models/', model_names[i], '/', type,'/confidence.rds'))
   gc()
 }
+
 
 list_of_top_vars = list()
 for(i in 1:length(model_names))
@@ -143,7 +145,129 @@ for(i in 1:length(model_names))
   list_of_top_vars[[model_names[i]]] = this_mod_list
 }
 
-list_of_top_vars
+
+
+
+#to assess again 2025:
+#finish the assess 2025 returns functions
+#create new training dataset with < 2025
+#create new test dataset for 2025
+#do the probability range assessments and the return assessments
+
+
+#expected value analysis for 2025:
+
+
+colnames(passing_pre_prep) = gsub(' |\\.', '_', colnames(passing_pre_prep))
+passing_pre_prep = passing_pre_prep[ , !duplicated(colnames(passing_pre_prep))]
+colnames(rushing_pre_prep) = gsub(' |\\.', '_', colnames(rushing_pre_prep))
+rushing_pre_prep = rushing_pre_prep[ , !duplicated(colnames(rushing_pre_prep))]
+colnames(receiving_pre_prep) = gsub(' |\\.', '_', colnames(receiving_pre_prep))
+receiving_pre_prep = receiving_pre_prep[ , !duplicated(colnames(receiving_pre_prep))]
+colnames(touchdown_pre_prep) = gsub(' |\\.', '_', colnames(touchdown_pre_prep))
+touchdown_pre_prep = touchdown_pre_prep[ , !duplicated(colnames(touchdown_pre_prep))]
+model_prep_results_ev_analysis = model_prep(passing_pre_prep, rushing_pre_prep, receiving_pre_prep, touchdown_pre_prep,
+                                            passing_data_column_categories, rushing_data_column_categories,
+                                            receiving_data_column_categories, touchdown_data_column_categories,
+                                            train_test_split = TRUE, split_by_year = 2025, train_mode = TRUE, bin_iv_limit = 0.01)
+
+
+column_categories = list(passing_data_column_categories = readRDS('model/data/passing_data_column_categories.rds'),
+                         rushing_data_column_categories = readRDS('model/data/rushing_data_column_categories.rds'),
+                         receiving_data_column_categories = readRDS('model/data/receiving_data_column_categories.rds'),
+                         touchdown_data_column_categories = readRDS('model/data/touchdown_data_column_categories.rds'))
+
+train_list = model_prep_results_ev_analysis[1:4]
+test_list = model_prep_results_ev_analysis[5:8]
+# all_models_data = rbind()
+for(i in 1:length(model_names))
+{
+  model_name = model_names[i]
+  print(model_name)
+  for (response in names(train_list[[i]]))
+  {
+    print(response)
+    train = train_list[[i]][[response]] %>%
+      select(-any_of(c(setdiff(column_categories[[i]]$basic_cols, 'GS'), model_manual_remove,  response_cols[[i]])))
+    test_orig = test_list[[i]][[response]] 
+    test = test_orig %>%
+      select(-any_of(c(setdiff(column_categories[[i]]$basic_cols, 'GS'), model_manual_remove,  response_cols[[i]])))
+    colnames(train) = gsub(' |\\.|/|-', '_', colnames(train))
+    colnames(test) = gsub(' |\\.|/|-', '_', colnames(test))
+    test[] <- lapply(test, function(x) if(is.character(x)) as.factor(x) else x)
+    
+    res = run_gbm(
+      df = train,
+      response = response,
+      model_name = model_names[i],
+      path = NULL,
+      t_per_s = c(750, 150),
+      i_range = c(2,5,8),
+      s_range = c(0.01,0.05),
+      n_range = 10,
+      b_range = c(0.3, 0.5, 0.7)
+    )
+    best_model = res[[2]]
+    tree = gbm.perf(best_model, method = "cv", plot.it = FALSE)
+    preds= predict(best_model, test, n.trees = tree, type = "response")
+    all_models_data = rbind(all_models_data, data.frame(Week = test_orig$Week,
+                                                        player_id = test_orig$player_id,
+                                                        Team = test_orig$Team,
+                                                        Season = test_orig$Season,
+                                                        response = response,
+                                                        Model_Probability = preds))
+  }
+}
+
+passing_test_data = bind_rows(test_list[[1]])%>% select(player_id, Season, Week, Team)
+rushing_test_data = bind_rows(test_list[[2]])%>% select(player_id, Season, Week, Team)
+receiving_test_data =bind_rows(test_list[[3]])%>% select(player_id, Season, Week, Team)
+td_test_data = bind_rows(test_list[[4]])%>% select(player_id, Season, Week, Team)
+all_test_data = bind_rows(passing_test_data, rushing_test_data, receiving_test_data, td_test_data)
+
+player_bios = readRDS('data_collection/saved_data_files/player_bios.rds')
+all_models_data_with_bet_info = all_models_data %>% inner_join(player_bios %>% select(player_id, names, positions), 'player_id') %>%
+  cbind(all_test_data$Season) %>%
+  rename('Season' = 'all_test_data$Season') %>%
+  left_join(team_lookup_table %>% select(Team,TV_abbr), join_by('Team')) %>%
+  filter(Season == 2025) %>%
+  mutate(cleaned_name = clean_names(names)) %>%
+  inner_join(playergl,join_by('cleaned_name' == 'cleaned_name', 'Week' == 'week', 'TV_abbr' == 'team')) %>%
+  calculate_probability_ranges() %>%
+  mutate(Bet_Label = ifelse(response == 'Anytime Touchdown Scorer', NA, str_extract(response,'[0-9]+')),
+         Bet_Category = ifelse(response == 'Anytime Touchdown Scorer', 'Anytime Touchdown Scorer', gsub('[0-9]+|_Yds_', '', response)),
+         Total_Touchdowns =rushing_tds +receiving_tds,
+         BetColumn = case_when(
+           Bet_Category == 'Anytime Touchdown Scorer' ~ Total_Touchdowns,
+           Bet_Category == 'Passing' ~ passing_yards,
+           Bet_Category == 'Rushing'~ rushing_yards,
+           Bet_Category == 'Receiving' ~ receiving_yards
+         ),
+         BetHit = ifelse(BetColumn >= Bet_Label, TRUE, FALSE)) %>%
+  mutate(Bet_Category = tolower(Bet_Category)) %>%
+  inner_join(bet_recommendations %>%
+               mutate(cleaned_name = clean_names(Player)) %>%
+               mutate(Bet_Type = tolower(Bet_Type), Label = gsub('\\+','',Label)) %>%
+               select(Week, cleaned_name, Bet_Type, Label, Odds), join_by('cleaned_name', 'Week', 'Bet_Category' == 'Bet_Type', 'Bet_Label' == 'Label')) %>%
+  mutate(profit_per_100_if_win = ifelse(Odds > 0, Odds, 100^2/(-1*Odds)),
+         profit_per_100 = profit_per_100_if_win*Model_Probability - 100*(1-Model_Probability),
+         Payout = ifelse(BetHit == TRUE, profit_per_100, -100))
+
+model_assessment = lapply(unique(all_models_data_with_names$response), function(x) all_models_data_with_names %>% filter(response==x) %>% assess_probability_ranges())
+
+
+model_data_with_ev_ranges = all_models_data_with_bet_info %>% calculate_ev_ranges() %>% calculate_odds_ranges()%>%
+  filter(Model_Probability >= 0.6)%>%
+  group_by(EV_Range_group, Odds_Range) %>% summarise(TotalBetAmt = 100*n(),
+                                         TotalProfit = sum(Payout),
+                                         PctWin = mean(BetHit),
+                                         Return = TotalProfit/TotalBetAmt) %>%
+  select(-TotalBetAmt, -TotalProfit, -PctWin) %>%
+  pivot_wider(names_from = Odds_Range, values_from=Return)
+
+#next: join to get the player name (instead of player id) and then join to bet recommendations
+
+
 
 
 
