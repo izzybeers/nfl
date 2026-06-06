@@ -143,8 +143,10 @@ join_preds_and_props = function(preds, props)
     mutate(Betting_Line_Implied_Prob = ifelse(as.numeric(Odds) < 0, (-1)*as.numeric(Odds) / ((-1)*as.numeric(Odds) + 100), 100 / (as.numeric(Odds) + 100)),
            Timeslot = paste(Day, Time_of_Day)) %>%
     rename('Player' = 'names') %>%
-    filter(as.POSIXct(paste0(Date, ", ", Season, " ", Time),format = "%B %d, %Y %I:%M %p",tz = "America/New_York") > Sys.time() - 3600) %>%
-    mutate(posix_timestamp = as.POSIXct(paste0(Date, ", ", Season, " ", Time),format = "%B %d, %Y %I:%M %p",tz = "America/New_York")) %>%
+    mutate(posix_timestamp = as.POSIXct(paste0(Date, ", ",
+                                               ifelse(str_extract(Date,'[A-Za-z]+') %in% c('January', 'February'), Season + 1, Season),
+                                               " ", Time),format = "%B %d, %Y %I:%M %p",tz = "America/New_York")) %>%
+    filter(posix_timestamp > Sys.time() - 3600) %>%
     select(Player, Position, Starting, Type, label, Team, Opp, Date, Time, posix_timestamp, Timeslot, Odds, Model_Probability, Betting_Line_Implied_Prob, Expected_Accuracy, profit_per_100)
   return(joined)
 }
@@ -548,7 +550,6 @@ server <- function(input, output, session) {
   
   print(predictions)
   
-  
   latest_season = max(predictions$Season)
   latest_week = max(predictions$Week)
   latest_update_time = max(predictions$updateTime) %>% format("%Y-%m-%d %I:%M %p", tz = "America/New_York")
@@ -581,7 +582,7 @@ server <- function(input, output, session) {
   }
   
   results <- reactive({
-    req(!is.null(props_reactive_val()))             
+    req(!is.null(props_reactive_val()))
     join_preds_and_props(preds = predictions,
                          props = props_reactive_val())
   })
@@ -655,7 +656,6 @@ server <- function(input, output, session) {
   results_filtered = reactive({
     req(results())
     req(nrow(results()) > 0)
-    
     
     res = results()
     
@@ -864,7 +864,7 @@ server <- function(input, output, session) {
         radioButtons(
           inputId  = paste0("result_", bet_id),   # safer, ensures unique input IDs
           label    = description,
-          choices  = c("Win", "Loss", "Unfinished"),
+          choices  = c("Win", "Loss", "Refund", "Unfinished"),
           selected = "Unfinished",
           inline   = TRUE
         )
@@ -883,7 +883,7 @@ server <- function(input, output, session) {
       selection = input[[paste0('result_',bet_id)]]
       temp$Result[temp$id == bet_id] = selection
     }
-    table_to_write = temp %>% filter(Result != 'Unfinished')
+    table_to_write = temp %>% filter(!(Result %in% c('Unfinished')))
     tryCatch({
       sheet_append(ss = sheet_id, data = table_to_write, sheet = 'bet_results')
       showNotification("✅  Successfully Updated", type = "message", duration = 5)
@@ -1614,12 +1614,13 @@ shown_portfolio = reactive({
     {
       bet_subset = bet_subset %>% filter(!is.na(Result))
     }
-    bet_subset %>% mutate(Payout = ifelse(Result == 'Win', ifelse(Odds > 0, Amount+(Amount*Odds)/100, Amount + (100*Amount/(-1*Odds))), 0)) 
+    bet_subset %>% mutate(Payout = ifelse(Result == 'Win', ifelse(Odds > 0, Amount+(Amount*Odds)/100, Amount + (100*Amount/(-1*Odds))),
+                                          ifelse(Result == 'Refund', Amount, 0)))
   })
   
   output$bet_overall_summaries = renderDataTable({
     req(bet_summary_filtered())
-    bet_summary_filtered() %>% group_by(Bettor, Season) %>% summarise(Total_Bet = sum(Amount), Total_Payout = sum(Payout), Total_Return = sum(Payout) - sum(Amount), Total_Return_Percent = (sum(Payout) - sum(Amount))/sum(Amount)) %>%
+    bet_summary_filtered() %>% group_by(Bettor, Season) %>% summarise(Total_Bet = sum(Amount, na.rm = TRUE), Total_Payout = sum(Payout, na.rm = TRUE), Total_Return = sum(Payout, na.rm = TRUE) - sum(Amount, na.rm = TRUE), Total_Return_Percent = (sum(Payout, na.rm = TRUE) - sum(Amount, na.rm = TRUE))/sum(Amount, na.rm = TRUE)) %>%
      arrange(Bettor, Season) %>% datatable(caption = tags$caption(style = "caption-side: top; text-align: left; font-weight:600;", "Overall Seasonal Summary Per Bettor"
      ), options = list(dom = 't')) %>% formatPercentage('Total_Return_Percent') %>% formatCurrency(c('Total_Return', 'Total_Payout', 'Total_Bet'))
   })
