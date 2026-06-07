@@ -42,7 +42,7 @@ get_team_data = function(min_year, max_year, schedules_df, team_lookup_df)
                                                         team_redzone_plays = sum(play_type %in% c('pass', 'punt', 'run') & yardline_100 < 20, na.rm=TRUE),
                                                         team_redzone_receiving_plays = sum(play_type == 'pass' & yardline_100 < 20, na.rm=TRUE),
                                                         team_redzone_rushing_plays = sum(play_type == 'run' & yardline_100 < 20, na.rm=TRUE),
-                                                        fg_attempts = sum(field_goal_attempt,na.rm=T)) %>%
+                                                        fg_attempts = sum(field_goal_attempt,na.rm=T), .groups = "drop") %>%
     group_by(game_id, season, week, posteam) %>%
     summarise(team_drives = length(unique(drive)),
               team_drives_in_redzone = sum(drive_in_redzone, na.rm = TRUE),
@@ -50,14 +50,14 @@ get_team_data = function(min_year, max_year, schedules_df, team_lookup_df)
               team_redzone_plays = sum(team_redzone_plays, na.rm=TRUE),
               team_redzone_receiving_plays = sum(team_redzone_receiving_plays, na.rm=TRUE),
               team_redzone_rushing_plays = sum(team_redzone_rushing_plays, na.rm=TRUE),
-              team_total_fg_attempts = sum(fg_attempts,na.rm=T))
+              team_total_fg_attempts = sum(fg_attempts,na.rm=T), .groups = "drop")
   
   #game and team level table. some of these are defensive stats.
   time_of_possession = play_details %>%
     mutate(drive_time_of_possession = as.numeric(sapply(strsplit(drive_time_of_possession, ':'), function(x) x[1])) + as.numeric(sapply(strsplit(drive_time_of_possession, ':'), function(x) x[2]))/60) %>%
     filter(!is.na(drive_game_clock_start)) %>%
-    group_by(game_id, posteam, drive_game_clock_start) %>% summarise(drive_time_of_possession = max(drive_time_of_possession,na.rm=T)) %>%
-    group_by(game_id, posteam) %>% summarise(team_time_of_possession = sum(drive_time_of_possession,na.rm=T))
+    group_by(game_id, posteam, drive_game_clock_start) %>% summarise(drive_time_of_possession = max(drive_time_of_possession,na.rm=T), .groups = "drop") %>%
+    group_by(game_id, posteam) %>% summarise(team_time_of_possession = sum(drive_time_of_possession,na.rm=T), .groups = "drop")
   
   
   aggregated_play_data = play_details %>%
@@ -84,11 +84,11 @@ get_team_data = function(min_year, max_year, schedules_df, team_lookup_df)
               team_converted_fourth_downs = sum(fourth_down_converted, na.rm = TRUE),
               team_failed_fourth_downs = sum(fourth_down_failed, na.rm = TRUE),
               team_total_third_downs_attempted = team_converted_third_downs + team_failed_third_downs,
-              team_total_fourth_downs_attempted = team_converted_fourth_downs + team_failed_fourth_downs) %>%
+              team_total_fourth_downs_attempted = team_converted_fourth_downs + team_failed_fourth_downs, .groups = "drop") %>%
     left_join(time_of_possession, join_by('game_id', 'posteam')) %>% 
     left_join(team_redzone_drives %>% select(-season, -week), join_by('game_id', 'posteam'))
   
-  teamgl = teamgl %>% left_join(aggregated_play_data, join_by('game_id', 'team' == 'posteam', 'season', 'week'))
+  teamgl = teamgl %>% left_join(aggregated_play_data, join_by('game_id', 'team' == 'posteam'))
   
   oppgl = teamgl %>% select(season, week, opponent_team, team_win, team_differential, team_completions, team_attempts, team_passing_yards, team_passing_tds, team_passing_interceptions, team_sacks_suffered, team_sack_yards_lost, team_sack_fumbles, team_sack_fumbles_lost, team_passing_yards_after_catch, team_passing_first_downs, team_passing_2pt_conversions,
                             team_carries, team_rushing_yards, team_rushing_tds, team_rushing_fumbles, team_rushing_fumbles_lost, team_rushing_first_downs, team_rushing_2pt_conversions, team_receiving_fumbles, team_receiving_fumbles_lost, team_converted_third_downs, team_converted_fourth_downs, team_total_third_downs_attempted, team_total_fourth_downs_attempted, team_total_blitzers, team_total_pass_rushers, team_total_defense_box, short_week, long_week, team_num_plays,
@@ -122,6 +122,7 @@ get_team_data = function(min_year, max_year, schedules_df, team_lookup_df)
            team_passing_weighted_matchup_ratio_against_opp = team_passing_matchup_average_against_opp/team_average_passing_past_3_years,
            team_rushing_weighted_matchup_ratio_against_opp = team_rushing_matchup_average_against_opp/team_average_rushing_past_3_years
            ) %>%
+    ungroup() %>%
     select(-team_average_passing_past_3_years, -team_average_rushing_past_3_years, -team_total_games_against_opp_past_3_years, -team_average_passing_against_opp_past_3_years, -team_average_rushing_against_opp_past_3_years, -team_passing_matchup_average_against_opp, -team_rushing_matchup_average_against_opp)
   
   teamgl = team_data_with_matchups
@@ -159,9 +160,10 @@ summarize_current_season_team_stats = function(team_data, opp_data, team_calc_me
                                                                                                calc_metrics = opp_calc_metrics,
                                                                                                include_last3 = TRUE)
   
-  team_present_stats = c('team_differential', setdiff(colnames(team_data_with_historical_calculations_and_efficiency_metrics),
-                               c('opponent_team', 'season_type', 'team_last_week_ot_road', colnames(schedules), colnames(team_data_with_historical_calculations_and_efficiency_metrics)[str_detect(tolower(colnames(team_data_with_historical_calculations_and_efficiency_metrics)),'last3|avg|sd|min_|max_|median_|cv_|per_|pct_|matchup_ratio')])))
-  opp_present_stats = c('team_differential', setdiff(colnames(opp_data_with_historical_calculations_and_efficiency_metrics),
+  team_present_stats = c('team_differential', 'opponent_score', 'team_score',
+                         setdiff(colnames(team_data_with_historical_calculations_and_efficiency_metrics),
+                                 c('opponent_team', 'season_type', 'team_last_week_ot_road', colnames(schedules), colnames(team_data_with_historical_calculations_and_efficiency_metrics)[str_detect(tolower(colnames(team_data_with_historical_calculations_and_efficiency_metrics)),'last3|avg|sd|min_|max_|median_|cv_|per_|pct_|matchup_ratio')])))
+  opp_present_stats = c('team_differential', 'opponent_score', 'team_score', setdiff(colnames(opp_data_with_historical_calculations_and_efficiency_metrics),
                                c('opponent_team', 'season_type', 'opp_long_week', 'opp_short_week', colnames(schedules), colnames(opp_data_with_historical_calculations_and_efficiency_metrics)[str_detect(tolower(colnames(opp_data_with_historical_calculations_and_efficiency_metrics)),'last3|avg|sd|min_|max_|median_|cv_|per_|pct_|cumulative')])))
   
   team_data_with_historical_calculations_and_efficiency_metrics = team_data_with_historical_calculations_and_efficiency_metrics %>%
@@ -261,7 +263,7 @@ calculate_team_seasonal_historical_stats = function(team_data, opp_data, team_ca
     rename_with(~ gsub('sd_', 'sd_', .x)) %>%
     mutate(across(where(is.numeric), ~ ifelse(is.infinite(.x), NA, .x)))
   
-  team_column_categories[['game_info']] = c(setdiff(colnames(schedules), c('season', 'team', 'team_score', 'opponent_score', 'team_win','overtime', 'team_differential')),
+  team_column_categories[['game_info']] = c(setdiff(colnames(schedules), c('season', 'team', 'team_win', 'game_id', 'team_score', 'opponent_score', 'overtime', 'team_differential')),
                                             'opponent_team', 'team_last_week_ot_road', 'opp_long_week', 'opp_short_week')
   team_column_categories[['team_historical_seasons_stats']] = setdiff(colnames(team_seasonal_stats), c('season','team'))
   team_column_categories[['opp_historical_seasons_stats']] = setdiff(colnames(opp_seasonal_stats), c('opponent_team', 'season'))

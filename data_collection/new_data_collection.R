@@ -17,11 +17,15 @@ source('data_collection/scripts/blue_chip_analysis.R')
 
 t1 = Sys.time()
 
+print('Pulling team data...')
+
 team_data_all =  pull_all_team_stats(min_year, max_year, recalculate_seasonal = TRUE)
 team_data_combined = team_data_all[[1]]
 opp_data_combined= team_data_all[[2]]
 team_column_categories = team_data_all[[3]]
 team_redzone_drives = team_data_all[[4]]
+
+print('Pulling player data...')
 
 player_data_all = pull_all_player_stats(min_year, max_year, team_redzone_drives = team_redzone_drives, recalculate_seasonal = TRUE)
 player_data_combined = player_data_all[[1]]
@@ -36,6 +40,7 @@ column_categories = c(team_column_categories, player_column_categories)
 #2) If they missed any games, the team's performance in that area (passing or rushing) must have been a statistically significant difference from when they played vs not played.
 #3) If they played on more than one team during this timeframe, there was no statistically significant difference in their performance on different teams.
 
+print('Running blue chip analysis...')
 #quarterbacks
 #offense_pct > 0.5 means we are only considering games where the QB played more than half the snaps in the game. Any less will be considered a game they did not play for purposes of the analysis.
 blue_chip_analysis_passing = get_blue_chip_analysis(player_df = player_data_combined %>% filter(position_group == 'QB' & offense_pct > 0.5) %>% 
@@ -207,6 +212,8 @@ blue_chip_analysis_df = blue_chip_analysis_passing %>% mutate() %>%
 
 
 
+print('Pulling injuries data and applying to blue chip analysis...')
+
 
 injuries = load_injuries(seasons = min_year:max_year) %>% group_by(season, week, gsis_id, team) %>% slice(1) %>% ungroup() %>%
   mutate(illness = str_detect(tolower(practice_primary_injury), 'illness|covid|appendix|appendicitis|headache'),
@@ -245,6 +252,9 @@ column_categories[['playoff_clinching']] = setdiff(colnames(playoff_clinching_da
 
 #when joining on blue chip data, join on the player but also how it affects other players:
 #get blue chips listed as out and add field for team members called blue_chip_team_member_out
+
+print('Joining tables together...')
+
 model_data = player_data_combined %>%
   inner_join(team_data_combined %>% select(-game_id), join_by('season', 'week', 'team')) %>%
   inner_join(opp_data_combined, join_by('season', 'week', 'opponent_team')) %>%
@@ -257,7 +267,7 @@ model_data = player_data_combined %>%
                                                                                has_secondary_blue_chip_out = ifelse(is.na(has_secondary_blue_chip_out), FALSE, has_secondary_blue_chip_out)) %>%
   left_join(blue_chip_analysis_df, join_by('season','week','team','gsis_id')) %>%
   left_join(playoff_clinching_data, join_by('season' == 'Season', 'week' == 'Week', 'team' == 'Team')) %>%
-    filter(season >= (min_year+2)) %>% select(-team_score, -opponent_score) %>%
+    filter(season >= (min_year+2)) %>%
   mutate(game_on_birthday = substring(gameday,6,10) == substring(birth_date,6,10)) %>% select(-birth_date) %>%
   mutate(across(where(is.numeric), ~ ifelse(is.infinite(.x), NA, .x))) %>%
   select(-team_win, -team_differential) #this field is for the team models only
@@ -366,6 +376,8 @@ get_rushing_rookie_estimates = function(df)
            ))  %>% select(-games_coached_this_season, -avg_team_rush_attempts_this_coach_past_30_games, -games_coached)
   )
 }
+
+print('Running promotion demotion analysis...')
 
 rookie_receiving_analysis =  receiving_model_data %>%
   get_receiving_rookie_estimates() %>%
@@ -538,6 +550,9 @@ touchdown_model_data = touchdown_model_data %>%
          )) %>% select(-total_active_true_talent_baseline_rushing, -total_active_true_talent_baseline_receiving, -team_attempts, -pass_attempt_volume, -rush_attempt_volume)
 
 
+
+print('Finalizing datasets...')
+
 column_categories[['usage_and_depth']] = c(column_categories[['usage_and_depth']], 'true_talent_baseline_receiving', 'true_talent_baseline_rushing', 'adjusted_target_share', 'delta_adjusted_share_receiving', 'recent_form_delta_receiving', 'adjusted_rush_share', 'delta_adjusted_share_rushing', 'recent_form_delta_rushing')
 
 setdiff(colnames(passing_model_data), unlist(column_categories[-which(names(column_categories) %in% c('rushing_current_season_stats', 'receiving_current_season_stats', 'rushing_past_season_stats', 'receiving_past_season_stats', 'receivers_qb_stats'))]))
@@ -573,9 +588,8 @@ setdiff(unlist(column_categories[-which(names(column_categories) %in% c('passing
 #reception model response variable labels: 4,6,8,10
 #rushing+receiving model: 40,70,100,130
 #moneyline response variable: just win
-#alternate spreads: +/- 2.5, 3.5, 6.5. 7.5
+#alternate spreads: 
 #over/under was thinking of spreading it out (37.5, 43.5, 51.5, 58.5) but due to the fact that the total score is generally in increments of 3, 7, etc, this might require a different technique. Maybe drive models.
-
 
 
 
@@ -611,11 +625,4 @@ moneyline_model_data = team_model_data %>% select(-team_differential, -team_atte
 
 spread_model_data = team_model_data %>% select(-team_win, -team_attempts)
 
-# saveRDS(model_data, 'model_data.rds')
-# saveRDS(team_model_data, 'team_model_data.rds')
 
-write.csv(passing_model_data, 'passing_model_data.csv')
-write.csv(rushing_model_data, 'rushing_model_data.csv')
-write.csv(receiving_model_data, 'receiving_model_data.csv')
-write.csv(touchdown_model_data, 'touchdown_model_data.csv')
-write.csv(moneyline_model_data, 'moneyline_model_data.csv')
