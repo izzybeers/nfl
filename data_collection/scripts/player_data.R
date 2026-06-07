@@ -27,7 +27,7 @@ get_player_data = function(min_year, max_year, team_redzone_drives, schedules_da
   
   receiving_extra_stats = load_nextgen_stats(seasons = min_year:max_year, stat_type = 'receiving') %>%
     filter(week != 0) %>%
-    left_join(passing_extra_stats %>% group_by(team_abbr,season,week) %>% summarise(total_intended_air_yards_from_passer_game = sum(total_intended_air_yards)), join_by('season','week','team_abbr')) %>%
+    left_join(passing_extra_stats %>% group_by(team_abbr,season,week) %>% summarise(total_intended_air_yards_from_passer_game = sum(total_intended_air_yards), .groups = "drop"), join_by('season','week','team_abbr')) %>%
     mutate(total_cushion = avg_cushion*targets,
            total_separation = avg_separation*targets
     ) %>% select(season, week, team_abbr, total_cushion, total_separation, total_intended_air_yards_from_passer_game, player_gsis_id)
@@ -70,12 +70,12 @@ get_player_data = function(min_year, max_year, team_redzone_drives, schedules_da
     group_by(season, week, receiver_player_id, posteam) %>%
     summarise(catchable_balls = sum(is_catchable_ball, na.rm = TRUE),
            catchable_balls_caught = sum(is_catchable_ball & complete_pass, na.rm = TRUE),
-           redzone_targets = sum(!is.na(receiver_player_id) & yardline_100 < 20)
+           redzone_targets = sum(!is.na(receiver_player_id) & yardline_100 < 20), .groups = "drop"
     )
   
   rusher_pbp_data = play_details %>% filter(!is.na(rusher_player_id)) %>% filter(yardline_100 < 20) %>%
     group_by(season, week, rusher_player_id, posteam) %>%
-    summarise(redzone_carries = n())
+    summarise(redzone_carries = n(), .groups = "drop")
   
   time_spent_with_team = load_rosters_weekly(min_year:max_year) %>%
     filter(gsis_id != '') %>%
@@ -298,10 +298,10 @@ summarize_current_season_player_stats = function(data, defense_data, calc_metric
   
   stats_fields = colnames(player_dat)[str_detect(colnames(player_dat), 'max_|min_|avg_|sd_|median_|pct_|_pct|per_|differential|rating|average_|mean_|cv_|last3_|lag[0-9]|ratio')]
   column_categories[['passing_current_season_stats']] = setdiff(stats_fields[str_detect(stats_fields, 'passing|passer|passes|completion|attempt|air_yards|aggressive|sack|hurried|blitz|pressure|_hit') &
-                                                                               !str_detect(stats_fields, 'rushing|receiving')], c('pct_share_of_intended_air_yards', 'last3_pct_share_of_intended_air_yards'))
-  column_categories[['rushing_current_season_stats']] = stats_fields[str_detect(stats_fields, 'rushing|carries')]
-  column_categories[['receiving_current_season_stats']] = c(setdiff(stats_fields[str_detect(stats_fields, 'receiving|reception|target|catchable|separation|opportunity_rating|share_of_intended')], c('average_depth_of_target_passer', 'last3_average_depth_of_target_passer')),
-                                                            'pct_share_of_intended_air_yards', 'last3_pct_share_of_intended_air_yards')
+                                                                               !str_detect(stats_fields, 'rushing|receiving')], c('pct_share_of_intended_air_yards', 'last3_pct_share_of_intended_air_yards', stats_fields[str_detect(stats_fields, 'matchup')])))
+  column_categories[['rushing_current_season_stats']] = setdiff(stats_fields[str_detect(stats_fields, 'rushing|carries')], stats_fields[str_detect(stats_fields, 'matchup')])
+  column_categories[['receiving_current_season_stats']] = setdiff(c(setdiff(stats_fields[str_detect(stats_fields, 'receiving|reception|target|catchable|separation|opportunity_rating|share_of_intended')], c('average_depth_of_target_passer', 'last3_average_depth_of_target_passer')),
+                                                            'pct_share_of_intended_air_yards', 'last3_pct_share_of_intended_air_yards'), stats_fields[str_detect(stats_fields, 'matchup')])
   column_categories[['other_current_season_stats']] = stats_fields[str_detect(stats_fields, 'td|penal') & !str_detect(stats_fields, 'passing|rushing|receiving')] 
   
   #make sure nothing is in remaining or it won't be captured in the column categories:
@@ -401,8 +401,6 @@ calculate_player_seasonal_historical_stats = function(data, defense_data, column
     print(missing_cols)
   }
   
-  
-  
   return(list(player_seasonal_stats,
               defense_seasonal_stats,
               column_categories
@@ -420,20 +418,19 @@ pull_all_player_stats = function(min_year, max_year, team_redzone_drives, recalc
                                                                       column_categories = player_data[[3]], uninformative_stats_results = player_data[[4]], cols_for_historical_calculations = player_data[[5]])
   offense_current_season_stats = player_current_season_stats[[1]]
   defense_current_season_stats = player_current_season_stats[[2]]
-  column_categories_current_season = player_current_season_stats[[3]]
 
   if(recalculate_seasonal == TRUE)
   {
     player_historical_season_stats = calculate_player_seasonal_historical_stats(data = offense_data, defense_data = defense_data, column_categories = player_current_season_stats[[3]], calc_metrics = calc_metrics, cols_for_historical_calculations = player_data[[5]])
     offense_historical_season_stats = player_historical_season_stats[[1]]
     defense_historical_season_stats = player_historical_season_stats[[2]]
-    column_categories_historical_seasons = player_historical_season_stats[[3]]
+    player_column_categories = player_historical_season_stats[[3]]
     
     for(name in c('passing_past_season_stats', 'rushing_past_season_stats', 'receiving_past_season_stats', 'other_past_season_stats', 'past_season_usage_and_depth'))
     {
-      column_categories_historical_seasons[[name]] = 
-        c(paste0('Last_Season_', column_categories_historical_seasons[[name]]),
-          paste0('Two_Seasons_Ago_', column_categories_historical_seasons[[name]]))
+      player_column_categories[[name]] = 
+        c(paste0('Last_Season_', player_column_categories[[name]]),
+          paste0('Two_Seasons_Ago_', player_column_categories[[name]]))
     }
   } else {
     #offense_historical_season_stats = #read from supabase
@@ -445,7 +442,6 @@ pull_all_player_stats = function(min_year, max_year, team_redzone_drives, recalc
     left_join(offense_historical_season_stats %>% mutate(season_to_match = season + 1)  %>% select(-season) %>% rename_with(~paste0('Last_Season_', .x), -any_of(c('gsis_id', 'season_to_match'))), join_by('gsis_id', 'season' == 'season_to_match')) %>%
     left_join(offense_historical_season_stats %>% mutate(season_to_match = season + 2) %>% select(-season) %>% rename_with(~paste0('Two_Seasons_Ago_',.x), -any_of(c('gsis_id', 'season_to_match'))), join_by('gsis_id', 'season' == 'season_to_match'))
   
-  player_column_categories = c(column_categories_current_season, column_categories_historical_seasons)
   
   defense_data_combined = defense_current_season_stats %>%
     left_join(defense_historical_season_stats %>% mutate(season_to_match = season + 1)  %>% select(-season) %>% rename_with(~paste0('Last_Season_', .x), -any_of(c('player_id', 'season_to_match'))), join_by('player_id', 'season' == 'season_to_match')) %>%

@@ -1,28 +1,35 @@
 library(stats)
-setwd("~/nfl")
-source('model/scripts/model_prep_script.R')
+source('model/new_model_prep.R')
 source('model/scripts/run_models.R')
 source('model/scripts/model_results.R')
 source('data_collection/scripts/global.R')
+source('data_collection/new_data_collection.R')
 
-passing_pre_prep = readRDS('model/data/passing_preliminary_data.rds')
-rushing_pre_prep = readRDS('model/data/rushing_preliminary_data.rds')
-receiving_pre_prep = readRDS('model/data/receiving_preliminary_data.rds')
-touchdown_pre_prep = readRDS('model/data/touchdown_preliminary_data.rds')
+passing_pre_prep = passing_model_data
+rushing_pre_prep = rushing_model_data
+receiving_pre_prep = receiving_model_data
+touchdown_pre_prep = touchdown_model_data
+reception_pre_prep = reception_model_data
+rushing_receiving_pre_prep = rushing_receiving_model_data
+moneyline_pre_prep = moneyline_model_data
+spread_pre_prep = spread_model_data
 
-passing_data_column_categories = readRDS('model/data/passing_data_column_categories.rds')
+passing_numbers = c(150, 180, 210, 240, 270, 300, 330, 360)
+rushing_numbers = c(25, 40, 60, 80, 100, 120, 140)
+receiving_numbers = c(25, 40, 60, 80, 100, 120, 140)
+rushing_receiving_numbers = c(40, 70, 100, 130)
+spread_numbers = c(-2.5, 2.5, -3.5, 3.5, -6.5, 6.5, -7.5, 7.5)
 
-rushing_data_column_categories = readRDS('model/data/rushing_data_column_categories.rds')
+# model_prep_results = model_prep(passing_pre_prep, rushing_pre_prep, receiving_pre_prep, touchdown_pre_prep,
+#                                 passing_data_column_categories, rushing_data_column_categories,
+#                                 receiving_data_column_categories, touchdown_data_column_categories,
+#                                 train_test_split = TRUE, train_mode = TRUE, bin_iv_limit = 0.01)
 
-receiving_data_column_categories = readRDS('model/data/receiving_data_column_categories.rds')
+passing_model_ready = model_prep(data_to_prep = passing_pre_prep, numbers = passing_numbers, response_var = 'passing_yards',
+                                 current_season_column_category = "passing_current_season_stats",
+                                 historical_season_column_category = "passing_past_season_stats")
 
-touchdown_data_column_categories = readRDS('model/data/touchdown_data_column_categories.rds')
-
-
-model_prep_results = model_prep(passing_pre_prep, rushing_pre_prep, receiving_pre_prep, touchdown_pre_prep,
-                                passing_data_column_categories, rushing_data_column_categories,
-                                receiving_data_column_categories, touchdown_data_column_categories,
-                                train_test_split = TRUE, train_mode = TRUE, bin_iv_limit = 0.01)
+#keep working on categorizing the production/efficiency/opportunity categories
 
 
 new_passing_data = model_prep_results[[1]]

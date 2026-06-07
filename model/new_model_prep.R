@@ -6,19 +6,13 @@ library(gbm)
 library(ranger)
 library(tidyr)
 
-data_to_prep = readRDS('model/data/receiving_preliminary_data.rds')
-column_categories = readRDS('model/data/receiving_data_column_categories.rds')
-split_method = 'random'
 
-passing_numbers = c(150, 180, 210, 240, 270, 300, 330, 360)
-rushing_numbers = c(25, 40, 60, 80, 100, 120, 140)
-receiving_numbers = c(25, 40, 60, 80, 100, 120, 140)
-numbers = receiving_numbers
-raw_response_var = 'Receiving_Yds'
+split_method = 'random'
 
 this_or_that = data.frame(cbind(option1 = c('draft_round', 'Grass_Type', 'Roof', 'age'),
                                 option2 = c('draft_pick', 'Familiar_Grass_Type', 'Familiar_Roof_Type', 'Years_Since_Drafted')))
 
+response_var_list = paste0(response_var, '_', numbers)
 create_data_with_response_variables = function(df, numbers, response_var) {
   for(n in numbers)
   {
@@ -31,41 +25,15 @@ create_data_with_response_variables = function(df, numbers, response_var) {
 data_to_prep = data_to_prep %>%
   mutate(across(where(is.numeric), ~ifelse(is.infinite(.x), NA, .x)))
 
-
-
-#clean up the lag variable mistakes:
-setdiff(colnames(data_to_prep)[str_detect(colnames(data_to_prep), 'Lag')],
-        colnames(data_to_prep)[str_detect(colnames(data_to_prep), 'Lag') & str_detect(colnames(data_to_prep), 'Min|Max|Last3|Avg|Median|Cumulative|SD')])
-
-dim(data_to_prep)
-mistake_columns = colnames(data_to_prep)[str_detect(colnames(data_to_prep), 'Lag') & str_detect(colnames(data_to_prep), 'Min|Max|Last3|Avg|Median|Cumulative|SD')]
-data_to_prep = data_to_prep %>% select(-any_of(mistake_columns))
-dim(data_to_prep)
-
-for(i in 1:length(column_categories))
-{
-  column_categories[[i]] = column_categories[[i]][!(column_categories[[i]] %in% mistake_columns)]
-}
-
-
 avg_columns = colnames(data_to_prep)[str_detect(tolower(colnames(data_to_prep)), 'avg')]
-mean_columns = colnames(data_to_prep)[str_detect(tolower(colnames(data_to_prep)), 'mean')]
 sd_columns = colnames(data_to_prep)[str_detect(tolower(colnames(data_to_prep)), 'sd')]
 
-overlap_sd = sd_columns[which(gsub('sd_|_sd|SD_|_SD','', sd_columns) %in% c(gsub('_mean|mean_|_Mean|Mean_', '', mean_columns), gsub('_avg|avg_|Avg_|_Avg', '', avg_columns)))]
-
+overlap_sd = sd_columns[which(gsub('sd_|_sd|SD_|_SD','', sd_columns) %in% gsub('_avg|avg_|Avg_|_Avg', '', avg_columns))]
 
 for(sd_col in overlap_sd)
 {
-  if(gsub('sd_|_sd|SD_|_SD','', sd_col) %in% c(gsub('_mean|mean_|_Mean|Mean_', '', mean_columns)))
-  {
-    column_name = mean_columns[which(gsub('_mean|mean_|_Mean|Mean_', '', mean_columns) == gsub('sd_|_sd|SD_|_SD','', sd_col))]
-  } else if (gsub('sd_|_sd|SD_|_SD','', sd_col) %in% c(gsub('_avg|avg_|Avg_|_Avg', '', avg_columns))) {
-    column_name = avg_columns[which(gsub('_avg|avg_|Avg_|_Avg', '', avg_columns) == gsub('sd_|_sd|SD_|_SD','', sd_col))]
-  } else {
-    column_name = NA
-  }
-  cv_col_name = paste0('CV_',gsub('sd_|_sd|SD_|_SD','', sd_col))
+  column_name = avg_columns[which(gsub('_avg|avg_|Avg_|_Avg', '', avg_columns) == gsub('sd_|_sd|SD_|_SD','', sd_col))]
+  cv_col_name = paste0('cv_',gsub('sd_|_sd|SD_|_SD','', sd_col))
   data_to_prep = data_to_prep %>% mutate(!!cv_col_name := !!sym(sd_col)/!!sym(column_name))
 }
 
@@ -85,35 +53,31 @@ opp_historical_cv_columns = all_cv_columns[str_detect(tolower(all_cv_columns), '
 opp_historical_cv_current_season = opp_historical_cv_columns[-which(str_detect(opp_historical_cv_columns, '(Last_Season)|(Two_Seasons_Ago)'))]
 opp_historical_cv_recent_seasons = opp_historical_cv_columns[which(str_detect(opp_historical_cv_columns, '(Last_Season)|(Two_Seasons_Ago)'))]
 
-column_categories[[which(str_detect(names(column_categories), 'player_current_season'))]] = c(column_categories[[which(str_detect(names(column_categories), 'player_current_season'))]], player_historical_cv_current_season)
-column_categories[[which(str_detect(names(column_categories), 'player_recent_seasons'))]] = c(column_categories[[which(str_detect(names(column_categories), 'player_recent_seasons'))]], player_historical_cv_recent_seasons)
+column_categories[[current_season_column_category]] = c(column_categories[[current_season_column_category]], player_historical_cv_current_season)
+column_categories[[historical_season_column_category]] = c(column_categories[[historical_season_column_category]], player_historical_cv_recent_seasons)
 column_categories[[which(str_detect(names(column_categories), 'team_current_season'))]]= c(column_categories[[which(str_detect(names(column_categories), 'team_current_season'))]], team_historical_cv_current_season)
-column_categories[[which(str_detect(names(column_categories), 'team_recent_seasons'))]] = c(column_categories[[which(str_detect(names(column_categories), 'team_recent_seasons'))]], team_historical_cv_recent_seasons)
+column_categories[[which(str_detect(names(column_categories), 'team_historical_seasons'))]] = c(column_categories[[which(str_detect(names(column_categories), 'team_historical_seasons'))]], team_historical_cv_recent_seasons)
 column_categories[[which(str_detect(names(column_categories), 'opp_current_season'))]] = c(column_categories[[which(str_detect(names(column_categories), 'opp_current_season'))]], opp_historical_cv_current_season)
-column_categories[[which(str_detect(names(column_categories), 'opp_recent_seasons'))]] = c(column_categories[[which(str_detect(names(column_categories), 'opp_recent_seasons'))]], opp_historical_cv_recent_seasons)
+column_categories[[which(str_detect(names(column_categories), 'opp_historical_seasons'))]] = c(column_categories[[which(str_detect(names(column_categories), 'opp_historical_seasons'))]], opp_historical_cv_recent_seasons)
 
 
 if(split_method == 'random')
 {
   set.seed(1)
   train_indices = sample(1:nrow(data_to_prep), 0.6*nrow(data_to_prep) ,replace = FALSE)
-  
-  remaining_indices = setdiff(1:nrow(data_to_prep), train_indices)
-  test_indices = sample(remaining_indices, 0.5*length(remaining_indices))
-  final_test_indices = setdiff(remaining_indices, test_indices) #for the final logistic regression
+  test_indices = setdiff(1:nrow(data_to_prep), train_indices)
+  # remaining_indices = setdiff(1:nrow(data_to_prep), train_indices)
+  # test_indices = sample(remaining_indices, 0.5*length(remaining_indices))
+  # final_test_indices = setdiff(remaining_indices, test_indices) #for the final logistic regression
   
   train = data_to_prep[train_indices,]
   test = data_to_prep[test_indices,]
-  final_test = data_to_prep[final_test_indices,]
+  # final_test = data_to_prep[final_test_indices,]
 }
 
-train = create_data_with_response_variables(train, numbers, response_var = raw_response_var)
-test = create_data_with_response_variables(test, numbers, response_var = raw_response_var)
-final_test = create_data_with_response_variables(final_test, numbers, response_var = raw_response_var)
-
-#fixcolumncategories having dups for the snap columns
-
-
+train = create_data_with_response_variables(train, numbers, response_var = response_var)
+test = create_data_with_response_variables(test, numbers, response_var = response_var)
+# final_test = create_data_with_response_variables(final_test, numbers, response_var = response_var)
 
 
 #categorical IV
@@ -129,25 +93,25 @@ final_test = create_data_with_response_variables(final_test, numbers, response_v
 #scope: Player stats, player rank, team stats, team rank, opp stats, opp rank.
 
 
-column_categories_df = categorize_stats_fields(column_categories) %>% distinct()
+column_categories_df = categorize_stats_fields(column_categories, column_category_current = current_season_column_category,
+                                               past_season_column_category = historical_season_column_category) %>% distinct()
 
 
 
 #information value:
 
-exclude_from_information_value = c('player_id', 'names', 'Week', 'Gtm', 'Season', 'Date', 'min_year', 'max_year', 'Time', 'Team', 'Opp', 'current_team', 'birthday')
-
+exclude_from_information_value = c(column_categories$identifiers, 'week', 'game_id', 'team_score', 'opponent_score', 'team_qb_id', 'team_coach')
 
 list_training_data = list()
 list_test_data = list()
-list_final_test_data = list()
+#list_final_test_data = list()
 
-for(r in response_var)
+for(r in response_var_list)
 {
   
   this_response_df = train %>% select(-any_of(setdiff(colnames(train)[which(str_detect(colnames(train), paste0(gsub('_[0-9]+','',r), '_[0-9]+')))], r)))
   this_response_df_test = test %>% select(-any_of(setdiff(colnames(test)[which(str_detect(colnames(test), paste0(gsub('_[0-9]+','',r), '_[0-9]+')))],r)))
-  this_response_df_final_test = final_test %>% select(-any_of(setdiff(colnames(final_test)[which(str_detect(colnames(final_test), paste0(gsub('_[0-9]+','',r), '_[0-9]+')))],r)))
+  #this_response_df_final_test = final_test %>% select(-any_of(setdiff(colnames(final_test)[which(str_detect(colnames(final_test), paste0(gsub('_[0-9]+','',r), '_[0-9]+')))],r)))
                                                      
   print(r)
   
