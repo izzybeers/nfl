@@ -44,7 +44,7 @@ blue_chip_analysis_passing = get_blue_chip_analysis(player_df = player_data_comb
                                                              'avg_player_metric' = 'avg_passing_yards',
                                                              'last_season_avg_player_metric' = 'Last_Season_avg_passing_yards',
                                                              'two_seasons_ago_avg_player_metric' = 'Two_Seasons_Ago_avg_passing_yards'),
-                                                    team_df = team_data[[1]] %>% select(team, season, week, team_passing_yards) %>%
+                                                    team_df = team_data_combined %>% select(team, season, week, team_passing_yards) %>%
                                                                                           rename('team_metric' = 'team_passing_yards'),
                                                     direction_play_vs_not_play = 'greater')
 
@@ -59,7 +59,7 @@ blue_chip_analysis_rushing = get_blue_chip_analysis(player_df = player_data_comb
                                                              'last_season_avg_player_metric' = 'Last_Season_avg_rushing_yards',
                                                              'two_seasons_ago_avg_player_metric' = 'Two_Seasons_Ago_avg_rushing_yards',
                                                              'pct_share' = 'pct_share_of_rushing_yards'),
-                                                    team_df = team_data[[1]] %>% select(team, season, week, team_rushing_yards) %>%
+                                                    team_df = team_data_combined %>% select(team, season, week, team_rushing_yards) %>%
                                                       rename('team_metric' = 'team_rushing_yards'),
                                                     direction_play_vs_not_play = 'greater')
 
@@ -73,7 +73,7 @@ blue_chip_analysis_receiving = get_blue_chip_analysis(player_df = player_data_co
                                                              'last_season_avg_player_metric' = 'Last_Season_avg_receiving_yards',
                                                              'two_seasons_ago_avg_player_metric' = 'Two_Seasons_Ago_avg_receiving_yards',
                                                              'pct_share' = 'pct_share_of_intended_air_yards'),
-                                                    team_df = team_data[[1]] %>% select(team, season, week, team_passing_yards) %>%
+                                                    team_df = team_data_combined %>% select(team, season, week, team_passing_yards) %>%
                                                       rename('team_metric' = 'team_passing_yards'),
                                                     direction_play_vs_not_play = 'greater')
 
@@ -99,7 +99,7 @@ blue_chip_analysis_defense_pass_rushers = get_blue_chip_analysis(player_df = def
                                                                'last_season_avg_player_metric' = 'Last_Season_avg_def_pressure_score',
                                                                'two_seasons_ago_avg_player_metric' = 'Two_Seasons_Ago_avg_def_pressure_score',
                                                                'pct_share' = 'pct_share_of_pressures'),
-                                                      team_df = team_data[[3]] %>% rename('team' = 'opponent_team') %>% mutate(team_metric = opp_sacks_forced_per_attempt_allowed_current_game),
+                                                      team_df = opp_data_combined %>% rename('team' = 'opponent_team') %>% mutate(team_metric = opp_sacks_forced_per_attempt_allowed_current_game),
                                                       direction_play_vs_not_play = 'greater')
 
 blue_chip_analysis_defense_rush_tackles = get_blue_chip_analysis(player_df = defense_data_combined %>% filter(position %in% c('DT', 'NT', 'MLB', 'ILB', 'DL', 'LB', 'DE', 'OLB') & defense_pct > 0.2)%>%
@@ -108,7 +108,7 @@ blue_chip_analysis_defense_rush_tackles = get_blue_chip_analysis(player_df = def
                                                                           'last_season_avg_player_metric' = 'Last_Season_avg_def_tackles_score',
                                                                           'two_seasons_ago_avg_player_metric' = 'Two_Seasons_Ago_avg_def_tackles_score',
                                                                           'pct_share' = 'pct_share_of_tackles'),
-                                                                 team_df = team_data[[3]] %>% rename('team' = 'opponent_team') %>% mutate(team_metric = opp_rushing_yards_per_carry_allowed_current_game),
+                                                                 team_df = opp_data_combined %>% rename('team' = 'opponent_team') %>% mutate(team_metric = opp_rushing_yards_per_carry_allowed_current_game),
                                                                  direction_play_vs_not_play = 'less')
 
 blue_chip_analysis_defense_secondary = get_blue_chip_analysis(player_df = defense_data_combined %>% filter(position %in% c('CB', 'FS', 'S', 'SAF', 'DB') & defense_pct > 0.2) %>%
@@ -117,7 +117,7 @@ blue_chip_analysis_defense_secondary = get_blue_chip_analysis(player_df = defens
                                                                           'last_season_avg_player_metric' = 'Last_Season_avg_def_pass_defend_and_int_score',
                                                                           'two_seasons_ago_avg_player_metric' = 'Two_Seasons_Ago_avg_def_pass_defend_and_int_score',
                                                                           'pct_share' = 'pct_share_of_pass_defense_and_int'),
-                                                                 team_df = team_data[[3]] %>% rename('team' = 'opponent_team') %>% mutate(team_metric = opp_passing_yards_per_attempt_allowed_current_game),
+                                                                 team_df = opp_data_combined %>% rename('team' = 'opponent_team') %>% mutate(team_metric = opp_passing_yards_per_attempt_allowed_current_game),
                                                               direction_play_vs_not_play = 'less') 
 
 #next steps:
