@@ -40,8 +40,8 @@ for(sd_col in overlap_sd)
 data_to_prep = data_to_prep %>%
   mutate(across(where(is.numeric), ~ifelse(is.infinite(.x), NA, .x)))
 
-all_cv_columns = colnames(data_to_prep)[str_detect(colnames(data_to_prep), 'CV')]
-player_historical_cv_columns = all_cv_columns[(str_detect(tolower(all_cv_columns), '(sum_)|(pct_)|(avg_)|(median_)|(sd_)|(max_)|(min_)|(cumulative_)|(cv_)|(per_)|(seasons_ago)|(last_season)|(last3)|(lag)[0-9]') | str_detect(tolower(all_cv_columns), '(_sum)|(_avg)|(_pct)|(_median)|(_sd)|(_max)|(_min)|(_cumulative)(cv_)|')) & (!str_detect(all_cv_columns, '(Opp)|(Team)|(Rank)|(Pct_Team)'))]
+all_cv_columns = colnames(data_to_prep)[str_detect(colnames(data_to_prep), 'cv')]
+player_historical_cv_columns = all_cv_columns[(str_detect(tolower(all_cv_columns), '(sum_)|(pct_)|(avg_)|(median_)|(sd_)|(max_)|(min_)|(cumulative_)|(cv_)|(per_)|(seasons_ago)|(last_season)|(last3)|(lag)[0-9]') | str_detect(tolower(all_cv_columns), '(_sum)|(_avg)|(_pct)|(_median)|(_sd)|(_max)|(_min)|(_cumulative)(cv_)|')) & (!str_detect(all_cv_columns, '(opp)|(team)|(rank)'))]
 player_historical_cv_current_season = player_historical_cv_columns[-which(str_detect(player_historical_cv_columns, '(Last_Season)|(Two_Seasons_Ago)'))]
 player_historical_cv_recent_seasons = player_historical_cv_columns[which(str_detect(player_historical_cv_columns, '(Last_Season)|(Two_Seasons_Ago)'))]
 
@@ -49,7 +49,7 @@ team_historical_cv_columns = all_cv_columns[str_detect(tolower(all_cv_columns), 
 team_historical_cv_current_season = team_historical_cv_columns[-which(str_detect(team_historical_cv_columns, '(Last_Season)|(Two_Seasons_Ago)'))]
 team_historical_cv_recent_seasons = team_historical_cv_columns[which(str_detect(team_historical_cv_columns, '(Last_Season)|(Two_Seasons_Ago)'))]
 
-opp_historical_cv_columns = all_cv_columns[str_detect(tolower(all_cv_columns), 'opp') & (str_detect(tolower(all_cv_columns), '(sum_)|(pct_)|(rank_)|(avg_)|(median_)|(sd_)|(max_)|(min_)|(cumulative_)|(cv_)|(per_)|(seasons_ago)|(last_season)|(last3)|(lag)[0-9]') | str_detect(tolower(all_cv_columns), '(_sum)|(_avg)|(rank_)|(_pct)|(_median)|(_sd)|(_max)|(_min)|(_cumulative)(cv_)|'))]
+opp_historical_cv_columns = all_cv_columns[str_detect(tolower(all_cv_columns), 'opp') & !str_detect(tolower(all_cv_columns), 'team') & (str_detect(tolower(all_cv_columns), '(sum_)|(pct_)|(rank_)|(avg_)|(median_)|(sd_)|(max_)|(min_)|(cumulative_)|(cv_)|(per_)|(seasons_ago)|(last_season)|(last3)|(lag)[0-9]') | str_detect(tolower(all_cv_columns), '(sum_)|(avg_)|(rank_)|(_pct)|(_median)|(sd_)|(max_)|(min_)|(cumulative_)(cv_)|'))]
 opp_historical_cv_current_season = opp_historical_cv_columns[-which(str_detect(opp_historical_cv_columns, '(Last_Season)|(Two_Seasons_Ago)'))]
 opp_historical_cv_recent_seasons = opp_historical_cv_columns[which(str_detect(opp_historical_cv_columns, '(Last_Season)|(Two_Seasons_Ago)'))]
 
