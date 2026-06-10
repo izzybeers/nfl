@@ -38,74 +38,43 @@ assess_probability_ranges = function(df) {
 
 categorize_stats_fields = function(column_categories, column_category_current, past_season_column_category)
 {
-  player_stats_cols_df = data.frame(Stat = column_categories[column_category_current],
-                                    scope = 'Player Stats')
-  colnames(player_stats_cols_df)[1] = 'Stat'
-  player_stats_cols_df = player_stats_cols_df %>% 
-    mutate(Timeframe = ifelse(str_detect(Stat, '(lag)|(last3)'), 'Recent Games', 'Full Current Season'),
-           RawStat = gsub('last3_|avg_|mean_|median_|min_|max_|cv_|sd_|cumulative_|_lag[0-9]', '', Stat),
-           StatType = case_when(
-             ((str_detect(RawStat, 'att|attempt|carries|target|tgt|snap|offense|active') & !(RawStat %in% 'average_depth_of_target_passer') & !str_detect(RawStat, 'per|pct'))) | (RawStat %in% c('offense_pct', 'time_to_throw_per_attempt', 'games_played', 'also_played_defense')) ~ 'Opportunity',
-             str_detect(RawStat, 'per|pct') & !str_detect(RawStat, 'snap') & !(RawStat %in% c('offense_pct', 'time_to_throw_per_attempt')) ~ 'Efficiency',
-             .default = 'Production'
-           ))
-  rownames(player_stats_cols_df)= NULL
   
-  #for(type in unique(player_stats_cols_df$StatType))
-  #{
-   # print(toupper(type))
-    #print(paste(unique(player_stats_cols_df$RawStat[player_stats_cols_df$StatType == type]), collapse = ", "))
-  #}
+  if(!is.na(column_category_current))
+  {
+    player_stats_cols_df = data.frame(Stat = unlist(column_categories[c(column_category_current, "other_current_season_stats", "usage_and_depth")]),
+                                      scope = 'Player Stats') %>%
+      filter(!(Stat %in% column_categories$usage_and_depth[!str_detect(column_categories$usage_and_depth, 'offense_pct|also_played')]))
+    rownames(player_stats_cols_df) = NULL
+    player_stats_cols_df = player_stats_cols_df %>% 
+      mutate(Timeframe = ifelse(str_detect(Stat, '(lag)|(last3)'), 'Recent Games', 'Full Current Season'),
+             RawStat = gsub('last3_|avg_|mean_|median_|min_|max_|cv_|sd_|cumulative_|_lag[0-9]', '', Stat),
+             StatType = case_when(
+               ((str_detect(RawStat, 'att|attempt|carries|target|tgt|snap|offense|active|also_played') & !(RawStat %in% 'average_depth_of_target_passer') & !str_detect(RawStat, 'per|pct'))) | (RawStat %in% c('offense_pct', 'time_to_throw_per_attempt', 'games_played', 'also_played_defense')) ~ 'Opportunity',
+               str_detect(RawStat, 'per|pct') & !str_detect(RawStat, 'snap') & !(RawStat %in% c('offense_pct', 'time_to_throw_per_attempt')) ~ 'Efficiency',
+               .default = 'Production'
+             ))
+    rownames(player_stats_cols_df)= NULL
+  }
+
+  if(!is.na(past_season_column_category))
+  {
+    player_recent_seasons_stats_cols_df = data.frame(Stat = unlist(column_categories[c(past_season_column_category, "other_past_season_stats", "past_season_usage_and_depth")]),
+                                                     scope = 'Player Stats') %>%
+      filter(!(Stat %in% column_categories$past_seasonusage_and_depth[!str_detect(column_categories$past_season_usage_and_depth, 'offense_pct|also_played')]))
+    colnames(player_recent_seasons_stats_cols_df)[1] = 'Stat'
+    
+    player_recent_seasons_stats_cols_df = player_recent_seasons_stats_cols_df %>% 
+      mutate(Timeframe = 'Historical Seasons',
+             RawStat = gsub('Last_Season_|Two_Seasons_Ago_|min_|mean_|median_|max_|cv_|sd_|avg_', '', Stat),
+             StatType = case_when(
+               ((str_detect(RawStat, 'att|attempt|carries|target|tgt|snap|offense|active|also_played') & !(RawStat %in% 'average_depth_of_target_passer') & !str_detect(RawStat, 'per|pct'))) | (RawStat %in% c('offense_pct', 'time_to_throw_per_attempt')) ~ 'Opportunity',
+               str_detect(RawStat, 'per|pct') & !str_detect(RawStat, 'snap') & !(RawStat %in% c('offense_pct', 'time_to_throw_per_attempt')) ~ 'Efficiency',
+               .default = 'Production'
+             ))
+    rownames(player_recent_seasons_stats_cols_df)= NULL
+  }
   
-  player_recent_seasons_stats_cols_df = data.frame(column_name = column_categories[past_season_column_category],
-                                                   scope = 'Player Stats')
-  colnames(player_recent_seasons_stats_cols_df)[1] = 'Stat'
-  
-  player_recent_seasons_stats_cols_df = player_recent_seasons_stats_cols_df %>% 
-    filter(!(Stat %in% c('GS', 'Active', 'Playoffs'))) %>%
-    mutate(Timeframe = ifelse(str_detect(Stat, 'Last') & !str_detect(Stat,'Two_Season'), 'Last_Season', '2 Seasons Ago'),
-           RawStat = gsub('Last_Season_|Two_Seasons_Ago_|_min|_mean|_median|_max|cv_|_sd', '', Stat),
-           StatType = case_when(
-             ((str_detect(RawStat, 'att|attempt|carries|target|tgt|snap|offense|active') & !(RawStat %in% 'average_depth_of_target_passer') & !str_detect(RawStat, 'per|pct'))) | (RawStat %in% c('offense_pct', 'time_to_throw_per_attempt')) ~ 'Opportunity',
-             str_detect(RawStat, 'per|pct') & !str_detect(RawStat, 'snap') & !(RawStat %in% c('offense_pct', 'time_to_throw_per_attempt')) ~ 'Efficiency',
-             .default = 'Production'
-           ))
-  rownames(player_recent_seasons_stats_cols_df)= NULL
-  
-  # for(type in unique(player_recent_seasons_stats_cols_df$StatType))
-  # {
-  #   print(toupper(type))
-  #   print(paste(unique(player_recent_seasons_stats_cols_df$RawStat[player_recent_seasons_stats_cols_df$StatType == type]), collapse = ", "))
-  # }
-  
-  #Repeat for:
-  #player rank stats (current season and historical)
-  #team stats (current season and historical)
-  #team rank stats
-  #opp def stats (current season and historical)
-  #opp def rank stats
-  
-  # player_ranking_stats_cols_df = data.frame(column_name = column_categories['usage_and_depth'],
-  #                                           scope = 'Player Rankings')
-  # colnames(player_ranking_stats_cols_df)[1] = 'Stat'
-  # 
-  # player_ranking_stats_cols_df = player_ranking_stats_cols_df %>% 
-  #   mutate(Timeframe = ifelse(str_detect(Stat, 'last3'), 'Recent Games', 'Full Current Season'),
-  #          RawStat = gsub('_Last3|Pct_Team_|_Rank|_Median|_Season', '', Stat),
-  #          StatType = case_when(
-  #            ((str_detect(RawStat, 'att|attempt|target|tgt|snap|offense|active') & !(RawStat %in% 'average_depth_of_target_passer') & !str_detect(RawStat, 'per|pct'))) | (RawStat %in% c('offense_pct', 'time_to_throw_per_attempt')) ~ 'Opportunity',
-  #            str_detect(RawStat, 'per|pct') & !str_detect(RawStat, 'snap') & !(RawStat %in% c('offense_pct', 'time_to_throw_per_attempt')) ~ 'Efficiency',
-  #            .default = 'Production'
-  #          ))
-  # rownames(player_ranking_stats_cols_df )= NULL
-  
-  # for(type in unique(player_ranking_stats_cols_df$StatType))
-  # {
-  #   print(toupper(type))
-  #   print(paste(unique(player_ranking_stats_cols_df$RawStat[player_ranking_stats_cols_df$StatType == type]), collapse = ", "))
-  # }
-  
-  team_current_stats_cols_df = data.frame(column_name = column_categories[str_detect(names(column_categories), 'team_current_season')],
+  team_current_stats_cols_df = data.frame(Stat = unlist(column_categories[str_detect(names(column_categories), 'team_current_season|team_drives')]),
                                           scope = 'Team Stats')
   colnames(team_current_stats_cols_df)[1] = 'Stat'
   
@@ -114,23 +83,16 @@ categorize_stats_fields = function(column_categories, column_category_current, p
     mutate(Timeframe = ifelse(str_detect(Stat, 'last3'), 'Recent Games', 'Full Current Season'),
            RawStat = gsub('team_|last3_|min_|mean_|median_|max_|avg_|cumulative_|cv_|sd_|offense_', '', Stat),
            StatType = case_when(
-             (RawStat == 'differential_per_win' | str_detect(RawStat, 'per_|ratio|pct|dependency')) & !str_detect(RawStat, 'pct_plays|pct_drives|pct_trick|matchup') ~ 'Efficiency',
-            str_detect(RawStat, 'att|attempt|carries|target|tgt|snap|offense|active|pct_plays|pct_drives|pct_trick|qb_shotgun|sum_qb|play_action|screen') | RawStat %in% c('drives_in_redzone', 'drives', 'games_played','redzone_rushing_plays', 'redzone_receiving_plays', 'pace', 'time_of_possession', 'redzone_plays') ~ 'Opportunity',
+             (RawStat == 'differential_per_win' | str_detect(RawStat, 'per_|ratio|pct|dependency|passer_rating|aggressiveness')) & !str_detect(RawStat, 'pct_plays|pct_drives|pct_trick|matchup') ~ 'Efficiency',
+            str_detect(RawStat, 'att|attempt|carries|target|tgt|snap|offense|active|pct_plays|pct_drives|pct_trick|qb_shotgun|sum_qb|play_action|screen|times_') | RawStat %in% c('drives_in_redzone', 'drives', 'games_played','redzone_rushing_plays', 'redzone_receiving_plays', 'pace', 'time_of_possession', 'redzone_plays') ~ 'Opportunity',
              .default = 'Production'))
   rownames(team_current_stats_cols_df)= NULL
   
-  # for(type in unique(team_current_stats_cols_df$StatType))
-  # {
-  #   print(toupper(type))
-  #   print(paste(unique(team_current_stats_cols_df$RawStat[team_current_stats_cols_df$StatType == type]), collapse = ", "))
-  # }
-  
-  team_historical_season_stats_cols_df = data.frame(column_name = column_categories[str_detect(names(column_categories), 'team_historical_seasons')],
+  team_historical_season_stats_cols_df = data.frame(Stat = unlist(column_categories[str_detect(names(column_categories), 'team_historical_seasons')]),
                                                     scope = 'Team Stats')
-  colnames(team_historical_season_stats_cols_df)[1] = 'Stat'
   
   team_historical_season_stats_cols_df = team_historical_season_stats_cols_df %>% 
-    mutate(Timeframe = ifelse(str_detect(Stat, 'Last') & !str_detect(Stat,'Two_Season'), 'Last_Season', '2 Seasons Ago'),
+    mutate(Timeframe = 'Historical Seasons',
            RawStat = gsub('Last_Season_|Two_Seasons_Ago_|team_|last3_|min_|mean_|median_|max_|avg_|_cumulative_|cv_|sd_|sum_|offense_', '', Stat),
            StatType = case_when(
              (RawStat == 'differential_per_win' | str_detect(RawStat, 'per_|ratio|pct|dependency')) & !str_detect(RawStat, 'pct_plays|pct_drives|pct_trick|matchup') ~ 'Efficiency',
@@ -138,15 +100,8 @@ categorize_stats_fields = function(column_categories, column_category_current, p
              .default = 'Production'))
   rownames(team_historical_season_stats_cols_df)= NULL
   
-  # for(type in unique(team_historical_season_stats_cols_df$StatType))
-  # {
-  #   print(toupper(type))
-  #   print(paste(unique(team_historical_season_stats_cols_df$RawStat[team_historical_season_stats_cols_df$StatType == type]), collapse = ", "))
-  # }
-  
-  opp_current_stats_cols_df = data.frame(column_name = column_categories[str_detect(names(column_categories), 'opp_current_season')],
+  opp_current_stats_cols_df = data.frame(Stat = unlist(column_categories[str_detect(names(column_categories), 'opp_current_season')]),
                                          scope = 'Opp Stats')
-  colnames(opp_current_stats_cols_df)[1] = 'Stat'
   
   opp_current_stats_cols_df = opp_current_stats_cols_df %>% filter(!Stat %in% c('Opp_Used_To_Hot', 'Opp_Used_To_Cold', 'Opp.y')) %>%
     mutate(Timeframe = ifelse(str_detect(Stat, 'Last3'), 'Recent Games', 'Full Current Season'),
@@ -157,18 +112,11 @@ categorize_stats_fields = function(column_categories, column_category_current, p
              .default = 'Production'))
   rownames(opp_current_stats_cols_df)= NULL
   
-  # for(type in unique(opp_current_stats_cols_df$StatType))
-  # {
-  #   print(toupper(type))
-  #   print(paste(unique(opp_current_stats_cols_df$RawStat[opp_current_stats_cols_df$StatType == type]), collapse = ", "))
-  # }
-  
-  opp_historical_season_stats_cols_df = data.frame(column_name = column_categories[str_detect(names(column_categories), 'opp_historical_seasons')],
+  opp_historical_season_stats_cols_df = data.frame(Stat = unlist(column_categories[str_detect(names(column_categories), 'opp_historical_seasons')]),
                                                    scope = 'Opp Stats')
-  colnames(opp_historical_season_stats_cols_df)[1] = 'Stat'
-  
+
   opp_historical_season_stats_cols_df = opp_historical_season_stats_cols_df %>% 
-    mutate(Timeframe = ifelse(str_detect(Stat, 'Last') & !str_detect(Stat,'Two_Season'), 'Last_Season', '2 Seasons Ago'),
+    mutate(Timeframe = 'Historical Seasons',
            RawStat = gsub('Last_Season_|Two_Seasons_Ago_|opp_|last3_|min_|mean_|median_|max_|avg_|cumulative_|cv_|sd_|defense_', '', Stat),
            StatType = case_when(
              str_detect(RawStat, 'attempt|drives|carries|plays|per_play|total') & (!str_detect(RawStat, 'per_') | str_detect(RawStat, 'per_play')) ~ 'Opportunity',
@@ -176,22 +124,18 @@ categorize_stats_fields = function(column_categories, column_category_current, p
              .default = 'Production'))
   rownames(opp_historical_season_stats_cols_df)= NULL
   
-  # for(type in unique(opp_historical_season_stats_cols_df$StatType))
-  # {
-  #   print(toupper(type))
-  #   print(paste(unique(opp_historical_season_stats_cols_df$RawStat[opp_historical_season_stats_cols_df$StatType == type]), collapse = ", "))
-  # }
-  # 
-  
-  stats_columns_table = rbind(
-    player_stats_cols_df,
-    player_recent_seasons_stats_cols_df,
-    player_ranking_stats_cols_df,
-    team_current_stats_cols_df,
+  stats_columns_table = rbind(team_current_stats_cols_df,
     team_historical_season_stats_cols_df,
     opp_current_stats_cols_df,
     opp_historical_season_stats_cols_df
   )
+  if (!is.na(column_category_current)) {
+    stats_columns_table = rbind(stats_columns_table, player_stats_cols_df)
+  }
+  if (!is.na(past_season_column_category)) {
+    stats_columns_table = rbind(stats_columns_table, player_recent_seasons_stats_cols_df)
+  }
+
   return(stats_columns_table)
 }
 
@@ -206,7 +150,7 @@ trim_columns_by_iv_correlation = function(columns_df, train_df, num_winners_per_
   
   if(nrow(winners_df) > 0)
   {
-    cor_mat = cor(train_df %>% select(all_of(winners_df$Stat)), 
+    cor_mat = cor(train_df %>% ungroup() %>% select(all_of(winners_df$Stat)), 
                   use = "pairwise.complete.obs")  %>% data.frame()
     
     removal_list = c()
@@ -251,23 +195,23 @@ trim_columns_by_iv_correlation = function(columns_df, train_df, num_winners_per_
 
 #define functions for creating information value tables:
 
-create_iv_tables = function(df, response_var, var_list, column_categories, specific_bins = FALSE)
+create_iv_tables = function(df, r, var_list, column_categories, specific_bins = FALSE)
 {
   all_bins = rbind()
   all_ivs = rbind()
-  for(r in response_var)
+  for (var in var_list)
   {
-    for (var in var_list)
+    if (var %in% colnames(df))
     {
-      overall_mean = df %>% select(r) %>% pull() %>% mean()
-      unique_vals = length(na.omit(unique(df[,var])))
+      overall_mean = df %>% pull(response_var) %>% mean()
+      unique_vals = length(na.omit(unique(df[[var]])))
       pct_missing = mean(is.na(df[,var]))
       
       if(unique_vals > 1)
       {
         bins = woebin(df, y = r, x = var, bin_num_limit = 6, check_cate_num = FALSE, print_step = 0, print_info = FALSE) %>% data.frame() %>% select(!!sym(paste0(var, '.variable')), !!sym(paste0(var,'.bin')),!!sym(paste0(var,'.bin_iv')), !!sym(paste0(var,'.total_iv')), !!sym(paste0(var, '.posprob')), !!sym(paste0(var, '.count')))
         colnames(bins) = c('Variable', 'Bin', 'Bin_IV', 'Total_IV', 'Pos_Prob', 'Bin_Count')
-        bins = bins %>% mutate(Response = r, overall_mean_response = overall_mean, display = ifelse(unique_vals >= 3, 1, 0), unique_vals = unique_vals, pct_missing = pct_missing, class = class(df[,var]))
+        bins = bins %>% mutate(Response = r, overall_mean_response = overall_mean, display = ifelse(unique_vals >= 3, 1, 0), unique_vals = unique_vals, pct_missing = pct_missing, class = class(df[[var]]))
         ivs = bins %>% select(Variable, Total_IV, display, pct_missing) %>% distinct() %>% mutate(Response = r,
                                                                                      overall_mean_response = overall_mean)
         
@@ -345,28 +289,28 @@ create_iv_tables = function(df, response_var, var_list, column_categories, speci
                                    overall_mean_response= overall_mean))
       }
       
+    } else {
+    print(paste('Column not found in data:', var))
     }
+  }
+
+  all_ivs = all_ivs %>% mutate(Predictive_Power = case_when(
+    Total_IV < 0.02 ~ 'None',
+    Total_IV <= 0.1 ~ 'Low',
+    Total_IV <= 0.3 ~ 'Medium',
+    Total_IV <= 0.5 ~ 'High',
+    .default = 'Suspicious'
+  ))
   
-  
-  
-    all_ivs = all_ivs %>% mutate(Predictive_Power = case_when(
+  if(!is.null(all_bins))
+  {
+    all_bins = all_bins %>% mutate(Predictive_Power = case_when(
       Total_IV < 0.02 ~ 'None',
       Total_IV <= 0.1 ~ 'Low',
       Total_IV <= 0.3 ~ 'Medium',
       Total_IV <= 0.5 ~ 'High',
       .default = 'Suspicious'
     ))
-    
-    if(!is.null(all_bins))
-    {
-      all_bins = all_bins %>% mutate(Predictive_Power = case_when(
-        Total_IV < 0.02 ~ 'None',
-        Total_IV <= 0.1 ~ 'Low',
-        Total_IV <= 0.3 ~ 'Medium',
-        Total_IV <= 0.5 ~ 'High',
-        .default = 'Suspicious'
-      ))
-    }
   }
   return(list(all_ivs,all_bins))
 }
@@ -414,7 +358,7 @@ get_specific_iv_table = function(df, iv_table, bin_table, predictive_power_choic
 }
 
 
-this_or_that_results = function(ivs, this_or_that, responses)
+this_or_that_results = function(ivs, this_or_that, r)
 {
   #this_or_that[,paste0('decision_',responses)] = NA
   this_or_that$decision = NA
@@ -425,7 +369,7 @@ this_or_that_results = function(ivs, this_or_that, responses)
     if(option1 %in% ivs$Variable & !(option2 %in% ivs$Variable))
     {
       this_or_that[t, 'decision'] = option1
-    } else if(option2 %in% ivs$Variable & !(option1 %in% ivs$Variable))
+    } else if (option2 %in% ivs$Variable & !(option1 %in% ivs$Variable))
     {
       this_or_that[t, 'decision'] = option2
     } else if (option1 %in% ivs$Variable & option2 %in% ivs$Variable)
@@ -439,11 +383,9 @@ this_or_that_results = function(ivs, this_or_that, responses)
           slice(1) %>%
           pull()
       }
-    } else{
-      this_or_that[t, 'decision'] = NULL
     }
   } 
-  return(this_or_that)
+  return(this_or_that %>% filter(!is.na(decision)))
 }
 
 #Turn IV results into dummy variables:
