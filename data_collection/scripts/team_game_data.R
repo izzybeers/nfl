@@ -216,7 +216,7 @@ summarize_current_season_team_stats = function(team_data, opp_data, team_calc_me
   team_column_categories[['team_drives']] = colnames(team_data_with_historical_calculations_and_efficiency_metrics)[str_detect(colnames(team_data_with_historical_calculations_and_efficiency_metrics), 'redzone|drives|fg') & str_detect(colnames(team_data_with_historical_calculations_and_efficiency_metrics), 'team')]
   team_column_categories[['team_matchup_data']] = c('team_passing_weighted_matchup_ratio_against_opp', 'team_rushing_weighted_matchup_ratio_against_opp')
   team_column_categories[['team_current_season_stats']] = setdiff(c(colnames(team_data_with_historical_calculations_and_efficiency_metrics)[str_detect(colnames(team_data_with_historical_calculations_and_efficiency_metrics), 'max_|min_|avg_|sd_|median_|pct_|_pct|per_|differential|rating|average_|mean_|cv_|last3_|lag[0-9]|ratio')], 'team_pass_rush_ratio'),
-                                                                  c('team_rushing_yards', 'team_passing_yards', 'team_differential', 'team_win'))
+                                                                  c('team_rushing_yards', 'team_passing_yards', 'team_differential', 'team_win', team_column_categories[['team_drives']]))
   team_column_categories[['opp_current_season_stats']] = setdiff(colnames(opp_data_with_historical_calculations_and_efficiency_metrics)[str_detect(colnames(opp_data_with_historical_calculations_and_efficiency_metrics), 'max_|min_|avg_|sd_|median_|pct_|_pct|per_|differential|rating|average_|mean_|cv_|last3_|lag[0-9]|ratio')],
                                                                  c('opp_defense_passing_yards_allowed', 'opp_defense_rushing_yards_allowed', 'opp_defense_sacks_suffered_forced', 'opp_defense_attempts_allowed', 'opp_defense_carries_allowed',
                                                                    'opp_passing_yards_per_attempt_allowed_current_game', 'opp_sacks_forced_per_attempt_allowed_current_game', 'opp_rushing_yards_per_carry_allowed_current_game'))
@@ -240,11 +240,13 @@ calculate_team_seasonal_historical_stats = function(team_data, opp_data, team_ca
                      ), .names = "{.fn}_{.col}"), .groups = 'drop') %>%
     group_by(team, season) %>%
     ungroup() %>%
-    select(!matches('sum_|cumulative_')) %>%
+    rename_with(~ gsub("sum_", "cumulative_", .x)) %>%
     rename_with(~ gsub("mean_", "avg_", .x)) %>%
-    rename_with(~ gsub('Sd_', 'SD_', .x)) %>%
+    rename_with(~ gsub('Sd_|SD_', 'sd_', .x)) %>%
     mutate(across(where(is.numeric), ~ ifelse(is.infinite(.x), NA, .x))) %>%
-    mutate(team_pass_rush_ratio = ifelse(is.na(avg_team_rushing_yards) | avg_team_rushing_yards == 0, NA, avg_team_passing_yards/avg_team_rushing_yards))
+    mutate(team_pass_rush_ratio = ifelse(is.na(avg_team_rushing_yards) | avg_team_rushing_yards == 0, NA, avg_team_passing_yards/avg_team_rushing_yards)) %>%
+    calculate_efficiency_metrics(calc_metrics = team_calc_metrics, include_last3 = FALSE) %>%
+    select(!matches('sum_|cumulative_'))
   
   opp_seasonal_stats = opp_data %>%
     group_by(opponent_team, season) %>%
@@ -258,10 +260,12 @@ calculate_team_seasonal_historical_stats = function(team_data, opp_data, team_ca
                      ), .names = "{.fn}_{.col}"), .groups = 'drop') %>%
     group_by(opponent_team, season) %>%
     ungroup() %>%
-    select(!matches('sum_|cumulative_')) %>%
+    rename_with(~ gsub("sum_", "cumulative_", .x)) %>%
     rename_with(~ gsub("mean_", "avg_", .x)) %>%
-    rename_with(~ gsub('sd_', 'sd_', .x)) %>%
-    mutate(across(where(is.numeric), ~ ifelse(is.infinite(.x), NA, .x)))
+    rename_with(~ gsub('Sd_|SD_', 'sd_', .x)) %>%
+    mutate(across(where(is.numeric), ~ ifelse(is.infinite(.x), NA, .x))) %>%
+    calculate_efficiency_metrics(calc_metrics = opp_calc_metrics, include_last3 = FALSE) %>%
+    select(!matches('sum_|cumulative_'))
   
   team_column_categories[['game_info']] = c(setdiff(colnames(schedules), c('season', 'team', 'team_win', 'game_id', 'team_score', 'opponent_score', 'overtime', 'team_differential')),
                                             'opponent_team', 'team_last_week_ot_road', 'opp_long_week', 'opp_short_week')
