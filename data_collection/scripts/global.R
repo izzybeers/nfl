@@ -178,7 +178,7 @@ calc_metrics = list(
 
 team_calc_metrics = list(
   team_differential_per_win = c('cumulative_team_differential', 'cumulative_team_win'),
-  team_pct_plays_third_down = c('cumulative_team_total_third_downs', 'cumulative_team_num_plays'),
+  team_pct_plays_third_down = c('cumulative_team_total_third_downs_attempted', 'cumulative_team_num_plays'),
   team_pct_third_down_conversion = c('cumulative_team_converted_third_downs', 'cumulative_team_total_third_downs_attempted'),
   team_pct_plays_fourth_down_attempts = c('cumulative_team_total_fourth_downs_attempted', 'cumulative_team_num_plays'),
   team_pct_fourth_down_conversion = c('cumulative_team_converted_fourth_downs', 'cumulative_team_total_fourth_downs_attempted'),

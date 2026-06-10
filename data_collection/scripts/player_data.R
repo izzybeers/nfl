@@ -298,7 +298,7 @@ summarize_current_season_player_stats = function(data, defense_data, calc_metric
   
   stats_fields = colnames(player_dat)[str_detect(colnames(player_dat), 'max_|min_|avg_|sd_|median_|pct_|_pct|per_|differential|rating|average_|mean_|cv_|last3_|lag[0-9]|ratio')]
   column_categories[['passing_current_season_stats']] = setdiff(stats_fields[str_detect(stats_fields, 'passing|passer|passes|completion|attempt|air_yards|aggressive|sack|hurried|blitz|pressure|_hit') &
-                                                                               !str_detect(stats_fields, 'rushing|receiving')], c('pct_share_of_intended_air_yards', 'last3_pct_share_of_intended_air_yards', stats_fields[str_detect(stats_fields, 'matchup')])))
+                                                                               !str_detect(stats_fields, 'rushing|receiving')], c('pct_share_of_intended_air_yards', 'last3_pct_share_of_intended_air_yards', stats_fields[str_detect(stats_fields, 'matchup')]))
   column_categories[['rushing_current_season_stats']] = setdiff(stats_fields[str_detect(stats_fields, 'rushing|carries')], stats_fields[str_detect(stats_fields, 'matchup')])
   column_categories[['receiving_current_season_stats']] = setdiff(c(setdiff(stats_fields[str_detect(stats_fields, 'receiving|reception|target|catchable|separation|opportunity_rating|share_of_intended')], c('average_depth_of_target_passer', 'last3_average_depth_of_target_passer')),
                                                             'pct_share_of_intended_air_yards', 'last3_pct_share_of_intended_air_yards'), stats_fields[str_detect(stats_fields, 'matchup')])
