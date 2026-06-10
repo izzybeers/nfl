@@ -1,9 +1,7 @@
 library(rvest)
 library(httr)
-library(ytdlpr)
 library(dplyr)
 library(stringr)
-setwd("~/nfl")
 source('data_collection/scripts/global.R')
 team_lookup  = team_lookup_table
 date_cutoff = '2022-08-01'
@@ -30,14 +28,14 @@ youtube_dlp = import('yt_dlp')
 get_transcripts = function(team_lookup, date_cutoff)
 {
   consecutive_errors <<- 0
-  video_data_list = rbind()
+  #video_data_list = rbind()
   video_data_list = readRDS('video_data_checkpoint.rds')
   t1 = Sys.time()
   for (i in 2:nrow(team_lookup))
   {
     team_start = Sys.time()
-    team = team_lookup$NFLReadr_Team_Abbr[i]
-    print(team)
+    this_team = team_lookup$NFLReadr_Team_Abbr[i]
+    print(this_team)
     channel_id = team_lookup$YoutubeChannel[i]
     playlist_id = team_lookup$YoutubePlaylistId[i]
     if(!is.na(playlist_id))
@@ -60,9 +58,13 @@ get_transcripts = function(team_lookup, date_cutoff)
     }
     
     print(paste('Number of videos:', length(video_ids)))
-    counter = 0
-    videos_this_team = video_data_list %>% filter(team == team)
-    counter = which(video_ids == video_data_list$video_id[length(video_data_list$video_id)])
+    videos_this_team = video_data_list %>% filter(team == this_team)
+    if(nrow(videos_this_team) == 0)
+    {
+      counter = 0
+    } else {
+      counter = max(which(video_ids == videos_this_team$video_id[length(videos_this_team$video_id)]))
+    }
     for(v in video_ids[(counter+1):length(video_ids)])
     {
       counter = counter + 1
@@ -89,7 +91,7 @@ get_transcripts = function(team_lookup, date_cutoff)
           text = youtube_api$YouTubeTranscriptApi()$fetch(video_id = v)
           full_text = paste(sapply(text$snippets,function(x) trimws(gsub('(text=(\"|\'))|(\"|\', start)|>>', '', str_extract(as.character(x), "text=.*start")))), collapse = ' ')
           video_data_list = rbind(video_data_list,
-                                  data.frame(timestamp_posted, title, video_duration_mins, was_live, view_count, tags, description, full_text,  video_id = v) %>% mutate(team = team, ))
+                                  data.frame(timestamp_posted, title, video_duration_mins, was_live, view_count, tags, description, full_text,  video_id = v) %>% mutate(team = this_team))
           
           Sys.sleep(runif(1,15,45))
           if (counter %% 5 == 0) {
