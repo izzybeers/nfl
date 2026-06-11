@@ -18,6 +18,7 @@ passing_numbers = c(150, 180, 210, 240, 270, 300, 330, 360)
 rushing_numbers = c(25, 40, 60, 80, 100, 120, 140)
 receiving_numbers = c(25, 40, 60, 80, 100, 120, 140)
 rushing_receiving_numbers = c(40, 70, 100, 130)
+reception_numbers = c(4,6,8,10)
 spread_numbers = c(-2.5, 2.5, -3.5, 3.5, -6.5, 6.5, -7.5, 7.5)
 
 # model_prep_results = model_prep(passing_pre_prep, rushing_pre_prep, receiving_pre_prep, touchdown_pre_prep,
@@ -28,6 +29,27 @@ spread_numbers = c(-2.5, 2.5, -3.5, 3.5, -6.5, 6.5, -7.5, 7.5)
 passing_model_ready = model_prep(data_to_prep = passing_pre_prep, numbers = passing_numbers, response_var = 'passing_yards',
                                  current_season_column_category = "passing_current_season_stats",
                                  historical_season_column_category = "passing_past_season_stats")
+rushing_model_ready = model_prep(data_to_prep = rushing_pre_prep, numbers = rushing_numbers, response_var = 'rushing_yards',
+                                 current_season_column_category = "rushing_current_season_stats",
+                                 historical_season_column_category = "rushing_past_season_stats")
+receiving_model_ready = model_prep(data_to_prep = receiving_pre_prep, numbers = receiving_numbers, response_var = 'receiving_yards',
+                                 current_season_column_category = "receiving_current_season_stats",
+                                 historical_season_column_category = "receiving_past_season_stats")
+touchdown_model_ready = model_prep(data_to_prep = touchdown_pre_prep, numbers = NA, response_var = 'anytime_td_scorer',
+                                 current_season_column_category = "touchdown_current_season_stats",
+                                 historical_season_column_category = "touchdown_past_season_stats")
+rushing_receiving_model_ready = model_prep(data_to_prep = rushing_receiving_pre_prep, numbers = rushing_receiving_numbers, response_var = 'rushing_receiving_yards',
+                                 current_season_column_category = c("rushing_current_season_stats","receiving_current_season_stats"),
+                                 historical_season_column_category = c("rushing_past_season_stats", "receiving_past_season_stats"))
+reception_model_ready = model_prep(data_to_prep = reception_pre_prep, numbers = reception_numbers, response_var = 'receptions',
+                                   current_season_column_category = "receiving_current_season_stats",
+                                   historical_season_column_category = "receiving_past_season_stats")
+moneyline_model_ready = model_prep(data_to_prep = moneyline_pre_prep, numbers = NA, response_var = 'team_win',
+                                   current_season_column_category = NA,
+                                   historical_season_column_category = NA)
+spread_model_ready = model_prep(data_to_prep = spread_pre_prep, numbers = spread_numbers, response_var = 'team_differential',
+                                   current_season_column_category = NA,
+                                   historical_season_column_category = NA)
 
 #keep working on categorizing the production/efficiency/opportunity categories
 

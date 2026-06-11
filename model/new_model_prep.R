@@ -12,7 +12,7 @@ this_or_that = data.frame(cbind(option1 = c('draft_round', 'Grass_Type', 'Roof',
 create_data_with_response_variables = function(df, numbers, response_var) {
   for(n in numbers)
   {
-    df  = df %>% mutate(!!paste0(response_var, '_', n) := ifelse(!!sym(response_var) >= n, 1, 0))
+    df  = df %>% mutate(!!paste0(response_var, '_', gsub('-', 'minus', n)) := ifelse(!!sym(response_var) >= n, 1, 0))
   }
   return(df)
 }
@@ -22,7 +22,8 @@ model_prep = function(data_to_prep, numbers, response_var, current_season_column
 {
 
   data_to_prep = data_to_prep %>%
-    mutate(across(where(is.numeric), ~ifelse(is.infinite(.x), NA, .x)))
+    mutate(across(where(is.numeric), ~ifelse(is.infinite(.x), NA, .x))) %>%
+    filter(!is.na(!!sym(response_var)))
   
   avg_columns = colnames(data_to_prep)[str_detect(tolower(colnames(data_to_prep)), 'avg')]
   sd_columns = colnames(data_to_prep)[str_detect(tolower(colnames(data_to_prep)), 'sd')]
@@ -59,7 +60,7 @@ model_prep = function(data_to_prep, numbers, response_var, current_season_column
   column_categories[[which(str_detect(names(column_categories), 'opp_current_season'))]] = c(column_categories[[which(str_detect(names(column_categories), 'opp_current_season'))]], opp_historical_cv_current_season)
   column_categories[[which(str_detect(names(column_categories), 'opp_historical_seasons'))]] = c(column_categories[[which(str_detect(names(column_categories), 'opp_historical_seasons'))]], opp_historical_cv_recent_seasons)
   
-  if (!is.na(numbers))
+  if (any(!is.na(numbers)))
   {
     response_var_list = paste0(response_var, '_', numbers)
     data_to_prep = create_data_with_response_variables(data_to_prep, numbers, response_var = response_var)

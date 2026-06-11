@@ -203,7 +203,7 @@ create_iv_tables = function(df, r, var_list, column_categories, specific_bins = 
   {
     if (var %in% colnames(df))
     {
-      overall_mean = df %>% pull(response_var) %>% mean()
+      overall_mean = df %>% pull(r) %>% mean()
       unique_vals = length(na.omit(unique(df[[var]])))
       pct_missing = mean(is.na(df[,var]))
       
