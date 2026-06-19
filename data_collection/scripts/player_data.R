@@ -232,10 +232,24 @@ summarize_current_season_player_stats = function(data, defense_data, calc_metric
                              rushing_yards_lag1 = lag(rushing_yards),
                              rushing_yards_lag2 = lag(rushing_yards, n = 2),
                              rushing_yards_lag3 = lag(rushing_yards, n = 3),
+                             receptions_lag1 = lag(receptions),
+                             receptions_lag2 = lag(receptions, n = 2),
+                             receptions_lag3 = lag(receptions, n = 3),
                              tds_lag1 = lag(tds),
                              tds_lag2 = lag(tds, n = 2),
                              tds_lag3 = lag(tds, n = 3))
   
+  avg_columns = colnames(data_with_historical_calculations)[str_detect(tolower(colnames(data_with_historical_calculations)), 'avg')]
+  sd_columns = colnames(data_with_historical_calculations)[str_detect(tolower(colnames(data_with_historical_calculations)), 'sd')]
+  
+  overlap_sd = sd_columns[which(gsub('sd_|_sd|SD_|_SD','', sd_columns) %in% gsub('_avg|avg_|Avg_|_Avg', '', avg_columns))]
+  
+  for(sd_col in overlap_sd)
+  {
+    column_name = avg_columns[which(gsub('_avg|avg_|Avg_|_Avg', '', avg_columns) == gsub('sd_|_sd|SD_|_SD','', sd_col))]
+    cv_col_name = paste0('cv_',gsub('sd_|_sd|SD_|_SD','', sd_col))
+    data_with_historical_calculations = data_with_historical_calculations %>% mutate(!!cv_col_name := !!sym(sd_col)/!!sym(column_name))
+  }
   
   defense_with_historical_calculations = defense_data %>%
     arrange(season, player_id, week) %>%
@@ -360,6 +374,18 @@ calculate_player_seasonal_historical_stats = function(data, defense_data, column
     select(!matches('cumulative_|sum_|total_')) %>%
     select(!matches('team_drives|team_touchdowns|team_redzone'))
   
+  avg_columns = colnames(player_seasonal_stats)[str_detect(tolower(colnames(player_seasonal_stats)), 'avg')]
+  sd_columns = colnames(player_seasonal_stats)[str_detect(tolower(colnames(player_seasonal_stats)), 'sd')]
+  
+  overlap_sd = sd_columns[which(gsub('sd_|_sd|SD_|_SD','', sd_columns) %in% gsub('_avg|avg_|Avg_|_Avg', '', avg_columns))]
+  
+  for(sd_col in overlap_sd)
+  {
+    column_name = avg_columns[which(gsub('_avg|avg_|Avg_|_Avg', '', avg_columns) == gsub('sd_|_sd|SD_|_SD','', sd_col))]
+    cv_col_name = paste0('cv_',gsub('sd_|_sd|SD_|_SD','', sd_col))
+    player_seasonal_stats = player_seasonal_stats %>% mutate(!!cv_col_name := !!sym(sd_col)/!!sym(column_name))
+  }
+  
   defense_seasonal_stats = defense_data %>%
     group_by(player_id, position, season) %>%
     summarise(weeks_active = length(unique(week)),
@@ -379,7 +405,7 @@ calculate_player_seasonal_historical_stats = function(data, defense_data, column
                        select(!matches('cumulative_|sum_|sd_|cv_|min_|max_|median_|last3|total')) %>% rename_with(.fn = ~gsub('mean','avg', .x)) %>% select(-avg_fg_made, -avg_fg_att)
     
   
-  seasonal_stats_fields = colnames(player_seasonal_stats)[str_detect(colnames(player_seasonal_stats), 'max_|min_|avg_|sd_|median_|pct_|_pct|per_|differential|rating|average_|mean_|cv_|last3_|lag[0-9]|ratio')]
+  seasonal_stats_fields = colnames(player_seasonal_stats)[str_detect(colnames(player_seasonal_stats), 'max_|min_|avg_|sd_|cv_|median_|pct_|_pct|per_|differential|rating|average_|mean_|cv_|last3_|lag[0-9]|ratio')]
   column_categories[['passing_past_season_stats']] = setdiff(seasonal_stats_fields[str_detect(seasonal_stats_fields, 'passing|passer|passes|completion|attempt|air_yards|aggressive|sack|hurried|blitz|pressure|_hit') & !str_detect(seasonal_stats_fields,'rushing|receiving|total_intended_air')], 'pct_share_of_intended_air_yards')
   column_categories[['rushing_past_season_stats']] = seasonal_stats_fields[str_detect(seasonal_stats_fields, 'rushing|carries')]
   column_categories[['receiving_past_season_stats']] = c(setdiff(seasonal_stats_fields[str_detect(seasonal_stats_fields, 'receiving|reception|cushion|target|catchable|opportunity_rating|separation|share_of_intended')], 'average_depth_of_target_passer'),
