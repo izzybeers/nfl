@@ -95,8 +95,7 @@ get_team_data = function(min_year, max_year, schedules_df, team_lookup_df)
                             team_drives, team_touchdowns_in_redzone, team_drives_in_redzone, team_drives, team_total_fg_attempts)
   
   colnames(oppgl) = gsub('team_', 'opp_defense_', colnames(oppgl))
-  oppgl = oppgl %>%  rename('opp_short_week' = 'short_week', 'opp_long_week' = 'long_week',
-                            'opp_total_defense_box' = 'opp_defense_total_defense_box')
+  oppgl = oppgl %>%  rename('opp_short_week' = 'short_week', 'opp_long_week' = 'long_week')
   allowed_colnames = setdiff(1:ncol(oppgl), c(1:3, which(str_detect(colnames(oppgl), 'fumble|sack|interception|week|box|rushers|blitzers|num_plays'))))
   forced_colnames = which(str_detect(colnames(oppgl), 'fumble|sack|interception'))
   colnames(oppgl)[allowed_colnames] = paste0(colnames(oppgl)[allowed_colnames], '_allowed')
@@ -145,11 +144,35 @@ summarize_current_season_team_stats = function(team_data, opp_data, team_calc_me
            team_last_week_ot_road = lag(ot_road)) %>%
     select(-overtime, -ot_road) %>% select(-contains("cv_team_differential"))
   
+  avg_columns = colnames(team_data_with_historical_calculations)[str_detect(tolower(colnames(team_data_with_historical_calculations)), 'avg')]
+  sd_columns = colnames(team_data_with_historical_calculations)[str_detect(tolower(colnames(team_data_with_historical_calculations)), 'sd')]
+  
+  overlap_sd = sd_columns[which(gsub('sd_|_sd|SD_|_SD','', sd_columns) %in% gsub('_avg|avg_|Avg_|_Avg', '', avg_columns))]
+  
+  for(sd_col in overlap_sd)
+  {
+    column_name = avg_columns[which(gsub('_avg|avg_|Avg_|_Avg', '', avg_columns) == gsub('sd_|_sd|SD_|_SD','', sd_col))]
+    cv_col_name = paste0('cv_',gsub('sd_|_sd|SD_|_SD','', sd_col))
+    team_data_with_historical_calculations = team_data_with_historical_calculations %>% mutate(!!cv_col_name := !!sym(sd_col)/!!sym(column_name))
+  }
+  
   opp_data_with_historical_calculations = opp_data %>%
     arrange(season, opponent_team) %>%
     group_by(season, opponent_team) %>%
     group_modify(~ compute_slider_cumulatives(.x, opp_cols_for_historical_calculations, cumulative_only = FALSE)) %>%
     group_modify(~ compute_slider_cumulatives(.x, c('opp_defense_num_plays', 'opp_defense_attempts_allowed', 'opp_defense_carries_allowed', 'opp_defense_total_fg_attempts_allowed', colnames(opp_data)[str_detect(colnames(opp_data), 'total_')]), cumulative_only = TRUE))
+  
+  avg_columns = colnames(opp_data_with_historical_calculations)[str_detect(tolower(colnames(opp_data_with_historical_calculations)), 'avg')]
+  sd_columns = colnames(opp_data_with_historical_calculations)[str_detect(tolower(colnames(opp_data_with_historical_calculations)), 'sd')]
+  
+  overlap_sd = sd_columns[which(gsub('sd_|_sd|SD_|_SD','', sd_columns) %in% gsub('_avg|avg_|Avg_|_Avg', '', avg_columns))]
+  
+  for(sd_col in overlap_sd)
+  {
+    column_name = avg_columns[which(gsub('_avg|avg_|Avg_|_Avg', '', avg_columns) == gsub('sd_|_sd|SD_|_SD','', sd_col))]
+    cv_col_name = paste0('cv_',gsub('sd_|_sd|SD_|_SD','', sd_col))
+    opp_data_with_historical_calculations = opp_data_with_historical_calculations %>% mutate(!!cv_col_name := !!sym(sd_col)/!!sym(column_name))
+  }
   
   team_data_with_historical_calculations_and_efficiency_metrics = calculate_efficiency_metrics(df = team_data_with_historical_calculations,
                                                                                           calc_metrics = team_calc_metrics,
@@ -212,14 +235,14 @@ summarize_current_season_team_stats = function(team_data, opp_data, team_calc_me
     opp_data_with_historical_calculations_and_efficiency_metrics = opp_data_with_historical_calculations_and_efficiency_metrics  %>% select(-any_of(c(paste0('last3_median_', opp_low_medians), paste0('last3_min_', opp_low_medians))))
   }
   
-  
   team_column_categories[['team_drives']] = colnames(team_data_with_historical_calculations_and_efficiency_metrics)[str_detect(colnames(team_data_with_historical_calculations_and_efficiency_metrics), 'redzone|drives|fg') & str_detect(colnames(team_data_with_historical_calculations_and_efficiency_metrics), 'team')]
   team_column_categories[['team_matchup_data']] = c('team_passing_weighted_matchup_ratio_against_opp', 'team_rushing_weighted_matchup_ratio_against_opp')
-  team_column_categories[['team_current_season_stats']] = setdiff(c(colnames(team_data_with_historical_calculations_and_efficiency_metrics)[str_detect(colnames(team_data_with_historical_calculations_and_efficiency_metrics), 'max_|min_|avg_|sd_|median_|pct_|_pct|per_|differential|rating|average_|mean_|cv_|last3_|lag[0-9]|ratio')], 'team_pass_rush_ratio'),
+  team_column_categories[['team_current_season_stats']] = setdiff(c(colnames(team_data_with_historical_calculations_and_efficiency_metrics)[str_detect(colnames(team_data_with_historical_calculations_and_efficiency_metrics), 'max_|min_|avg_|sd_|cv_|median_|pct_|_pct|per_|differential|rating|average_|mean_|cv_|last3_|lag[0-9]|ratio')], 'team_pass_rush_ratio'),
                                                                   c('team_rushing_yards', 'team_passing_yards', 'team_differential', 'team_win', team_column_categories[['team_drives']]))
-  team_column_categories[['opp_current_season_stats']] = setdiff(colnames(opp_data_with_historical_calculations_and_efficiency_metrics)[str_detect(colnames(opp_data_with_historical_calculations_and_efficiency_metrics), 'max_|min_|avg_|sd_|median_|pct_|_pct|per_|differential|rating|average_|mean_|cv_|last3_|lag[0-9]|ratio')],
+  team_column_categories[['opp_current_season_stats']] = setdiff(colnames(opp_data_with_historical_calculations_and_efficiency_metrics)[str_detect(colnames(opp_data_with_historical_calculations_and_efficiency_metrics), 'max_|min_|avg_|sd_|median_|cv_|pct_|_pct|per_|differential|rating|average_|mean_|cv_|last3_|lag[0-9]|ratio')],
                                                                  c('opp_defense_passing_yards_allowed', 'opp_defense_rushing_yards_allowed', 'opp_defense_sacks_suffered_forced', 'opp_defense_attempts_allowed', 'opp_defense_carries_allowed',
-                                                                   'opp_passing_yards_per_attempt_allowed_current_game', 'opp_sacks_forced_per_attempt_allowed_current_game', 'opp_rushing_yards_per_carry_allowed_current_game'))
+                                                                   'opp_passing_yards_per_attempt_allowed_current_game', 'opp_sacks_forced_per_attempt_allowed_current_game', 'opp_rushing_yards_per_carry_allowed_current_game',
+                                                                   colnames(opp_data_with_historical_calculations_and_efficiency_metrics)[str_detect(colnames(opp_data_with_historical_calculations_and_efficiency_metrics), 'defense_attempts_allowed|defense_carries_allowed|total_fg_attempts_allowed')]))
   
   return(list(team_data_with_historical_calculations_and_efficiency_metrics,
               opp_data_with_historical_calculations_and_efficiency_metrics,
@@ -270,7 +293,8 @@ calculate_team_seasonal_historical_stats = function(team_data, opp_data, team_ca
   team_column_categories[['game_info']] = c(setdiff(colnames(schedules), c('season', 'team', 'team_win', 'game_id', 'team_score', 'opponent_score', 'overtime', 'team_differential')),
                                             'opponent_team', 'team_last_week_ot_road', 'opp_long_week', 'opp_short_week')
   team_column_categories[['team_historical_seasons_stats']] = setdiff(colnames(team_seasonal_stats), c('season','team'))
-  team_column_categories[['opp_historical_seasons_stats']] = setdiff(colnames(opp_seasonal_stats), c('opponent_team', 'season'))
+  team_column_categories[['opp_historical_seasons_stats']] = setdiff(colnames(opp_seasonal_stats), c('opponent_team', 'season',
+                                                                                                     colnames(opp_seasonal_stats)[str_detect(colnames(opp_seasonal_stats), 'defense_attempts_allowed|defense_carries_allowed|total_fg_attempts_allowed')]))
   
   return(list(team_seasonal_stats,
               opp_seasonal_stats,
