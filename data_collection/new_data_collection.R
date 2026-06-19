@@ -269,7 +269,17 @@ model_data = player_data_combined %>%
   left_join(playoff_clinching_data, join_by('season' == 'Season', 'week' == 'Week', 'team' == 'Team')) %>%
     filter(season >= (min_year+2)) %>%
   mutate(game_on_birthday = substring(gameday,6,10) == substring(birth_date,6,10)) %>% select(-birth_date) %>%
-  mutate(across(where(is.numeric), ~ ifelse(is.infinite(.x), NA, .x))) %>%
+  mutate(across(where(is.numeric), ~ ifelse(is.infinite(.x), NA, .x)),
+         out = coalesce(out, FALSE),
+         out_not_injury_related = coalesce(out_not_injury_related, FALSE),
+         illness = coalesce(illness, FALSE),
+         less_practice = coalesce(less_practice, FALSE),
+         passing_blue_chip = coalesce(passing_blue_chip, FALSE),
+         rushing_blue_chip = coalesce(rushing_blue_chip, FALSE),
+         receiving_blue_chip = coalesce(receiving_blue_chip, FALSE),
+         pass_rushers_blue_chip = coalesce(pass_rushers_blue_chip, FALSE),
+         rush_tackles_blue_chip = coalesce(rush_tackles_blue_chip, FALSE),
+         secondary_blue_chip = coalesce(secondary_blue_chip, FALSE)) %>%
   select(-team_win, -team_differential) #this field is for the team models only
   #left_join(video_llm_results[[1]], join_by('season', 'week', 'team')) %>%
   #left_join(video_llm_results[[2]], join_by('season', 'week', 'gsis_id')) 
@@ -591,12 +601,11 @@ setdiff(unlist(column_categories[-which(names(column_categories) %in% c('passing
 #alternate spreads: 
 #over/under was thinking of spreading it out (37.5, 43.5, 51.5, 58.5) but due to the fact that the total score is generally in increments of 3, 7, etc, this might require a different technique. Maybe drive models.
 
-
-
 team_offense = team_data_combined
 opp_defense = opp_data_combined
-team_defense = opp_data_combined %>% select(-opp_short_week, -opp_long_week) %>% rename_with(.fn = ~gsub('opp', 'team', .x), .cols = contains('opp_')) %>% rename('team' = 'opponent_team') 
-opp_offense = team_data_combined %>% rename_with(.fn = ~gsub('team', 'opp_offense', .x), .cols = contains('team_')) %>% select(-short_week, -long_week) %>% select(-opponent_team) %>% rename('opponent_team' = 'team') 
+team_defense = opp_data_combined %>% ungroup() %>% select(-opp_short_week, -opp_long_week) %>% rename_with(~str_replace(.x, 'opp_defense', 'team_defense')) %>% rename('team' = 'opponent_team') 
+opp_offense = team_data_combined %>% rename_with(.fn = ~gsub('team', 'opp_offense', .x), .cols = contains('team_')) %>% rename('opp_coach_previous_weeks_with_team' = 'coach_previous_weeks_with_team') %>% select(-opponent_team) %>% rename('opponent_team' = 'team')
+opp_offense = opp_offense %>% select(-any_of(setdiff(colnames(opp_offense)[!(str_detect(colnames(opp_offense), 'opp_offense|opp_defense'))], c('season','week','opponent_team', 'opp_coach_previous_weeks_with_team'))))
 
 team_stats = team_offense %>% inner_join(team_defense, join_by('season','week', 'team'))
 opp_stats = opp_offense %>% inner_join(opp_defense, join_by('season', 'week', 'opponent_team'))
@@ -613,16 +622,27 @@ team_model_data = team_stats %>% inner_join(opp_stats %>% select(-any_of(setdiff
                                              opp_has_receiving_blue_chip_out = ifelse(is.na(has_receiving_blue_chip_out), FALSE, has_receiving_blue_chip_out),
                                              opp_has_pass_rushers_blue_chip_out = ifelse(is.na(has_pass_rushers_blue_chip_out), FALSE, has_pass_rushers_blue_chip_out),
                                              opp_has_rush_tackles_blue_chip_out = ifelse(is.na(has_rush_tackles_blue_chip_out), FALSE, has_rush_tackles_blue_chip_out),
-                                             opp_has_secondary_blue_chip_out = ifelse(is.na(has_secondary_blue_chip_out), FALSE, has_secondary_blue_chip_out)), join_by('season','week','opponent_team' == 'team')) %>%
-  filter(season >= (min_year + 2))  %>%
+                                             opp_has_secondary_blue_chip_out = ifelse(is.na(has_secondary_blue_chip_out), FALSE, has_secondary_blue_chip_out)) %>%
+              select(-has_passing_blue_chip_out, -has_rushing_blue_chip_out, -has_receiving_blue_chip_out, -has_pass_rushers_blue_chip_out, -has_rush_tackles_blue_chip_out, -has_secondary_blue_chip_out), join_by('season','week','opponent_team' == 'team')) %>%
+  filter(season >= (min_year + 2) )  %>%
   left_join(playoff_clinching_data, join_by('season' == 'Season', 'week' == 'Week', 'team' == 'Team')) %>%
   mutate(across(where(is.numeric), ~ ifelse(is.infinite(.x), NA, .x)))
 
-
-
+column_categories[['team_current_season_stats']] = c(column_categories[['team_current_season_stats']],
+                                                     setdiff(colnames(team_defense)[!str_detect(colnames(team_defense), 'Last_Season|Two_Seasons')],
+                                                           c('season', 'team', 'week')))
+column_categories[['team_historical_season_stats']] = c(column_categories[['team_historical_season_stats']],
+                                                        colnames(team_defense)[str_detect(colnames(team_defense), 'Last_Season|Two_Seasons')])
+column_categories[['opp_current_season_stats']] = c(column_categories[['opp_current_season_stats']], 
+                                                  setdiff(colnames(opp_offense)[!str_detect(colnames(opp_offense), 'Last_Season|Two_Seasons')],
+                                                      c('season', 'opponent_team', 'week', 'opp_offense_coach', 'opp_offense_qb_id')))
+column_categories[['opp_historical_season_stats']] = c(column_categories[['opp_historical_season_stats']], colnames(opp_offense)[str_detect(colnames(opp_offense), 'Last_Season|Two_Seasons')])
+                                                           
+column_categories[['blue_chip']] = c(column_categories[['blue_chip']],
+                                     colnames(team_model_data)[str_detect(colnames(team_model_data), 'blue_chip') & str_detect(colnames(team_model_data), 'opp')])
 #response variable: win
-moneyline_model_data = team_model_data %>% select(-team_differential, -team_attempts)
+moneyline_model_data = team_model_data %>% select(-team_differential, -team_attempts, -opp_offense_attempts, -opp_offense_qb_id, -opp_offense_coach, -team_coach, -team_qb_id)
 
-spread_model_data = team_model_data %>% select(-team_win, -team_attempts)
+spread_model_data = team_model_data %>% select(-team_win, -team_attempts, -opp_offense_attempts, -opp_offense_qb_id, -opp_offense_coach, -team_coach, -team_qb_id)
 
 
