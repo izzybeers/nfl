@@ -18,55 +18,24 @@ create_data_with_response_variables = function(df, numbers, response_var) {
 }
 
 
-model_prep = function(data_to_prep, numbers, response_var, current_season_column_category, historical_season_column_category, split_method = 'random', split_models = FALSE)
+model_prep = function(data_to_prep, column_categories, numbers, response_var, current_season_column_category, historical_season_column_category, split_method = 'random', split_models = FALSE)
 {
 
   data_to_prep = data_to_prep %>%
     mutate(across(where(is.numeric), ~ifelse(is.infinite(.x), NA, .x))) %>%
+    mutate(across(where(is.logical), ~as.factor(.x))) %>%
     filter(!is.na(!!sym(response_var)))
-  
-  avg_columns = colnames(data_to_prep)[str_detect(tolower(colnames(data_to_prep)), 'avg')]
-  sd_columns = colnames(data_to_prep)[str_detect(tolower(colnames(data_to_prep)), 'sd')]
-  
-  overlap_sd = sd_columns[which(gsub('sd_|_sd|SD_|_SD','', sd_columns) %in% gsub('_avg|avg_|Avg_|_Avg', '', avg_columns))]
-  
-  for(sd_col in overlap_sd)
-  {
-    column_name = avg_columns[which(gsub('_avg|avg_|Avg_|_Avg', '', avg_columns) == gsub('sd_|_sd|SD_|_SD','', sd_col))]
-    cv_col_name = paste0('cv_',gsub('sd_|_sd|SD_|_SD','', sd_col))
-    data_to_prep = data_to_prep %>% mutate(!!cv_col_name := !!sym(sd_col)/!!sym(column_name))
-  }
-  
-  data_to_prep = data_to_prep %>%
-    mutate(across(where(is.numeric), ~ifelse(is.infinite(.x), NA, .x)))
-  
-  all_cv_columns = colnames(data_to_prep)[str_detect(colnames(data_to_prep), 'cv')]
-  player_historical_cv_columns = all_cv_columns[(str_detect(tolower(all_cv_columns), '(sum_)|(pct_)|(avg_)|(median_)|(sd_)|(max_)|(min_)|(cumulative_)|(cv_)|(per_)|(seasons_ago)|(last_season)|(last3)|(lag)[0-9]') | str_detect(tolower(all_cv_columns), '(_sum)|(_avg)|(_pct)|(_median)|(_sd)|(_max)|(_min)|(_cumulative)(cv_)|')) & (!str_detect(all_cv_columns, '(opp)|(team)|(rank)'))]
-  player_historical_cv_current_season = player_historical_cv_columns[-which(str_detect(player_historical_cv_columns, '(Last_Season)|(Two_Seasons_Ago)'))]
-  player_historical_cv_recent_seasons = player_historical_cv_columns[which(str_detect(player_historical_cv_columns, '(Last_Season)|(Two_Seasons_Ago)'))]
-  
-  team_historical_cv_columns = all_cv_columns[str_detect(tolower(all_cv_columns), 'team') & !str_detect(tolower(all_cv_columns), 'pct_team') & (str_detect(tolower(all_cv_columns), '(sum_)|(pct_)|(rank_)|(avg_)|(median_)|(sd_)|(max_)|(min_)|(cumulative_)|(cv_)|(per_)|(seasons_ago)|(last_season)|(last3)|(lag)[0-9]') | str_detect(tolower(all_cv_columns), '(_sum)|(_avg)|(_pct)|(rank_)|(_median)|(_sd)|(_max)|(_min)|(_cumulative)(cv_)|'))]
-  team_historical_cv_current_season = team_historical_cv_columns[-which(str_detect(team_historical_cv_columns, '(Last_Season)|(Two_Seasons_Ago)'))]
-  team_historical_cv_recent_seasons = team_historical_cv_columns[which(str_detect(team_historical_cv_columns, '(Last_Season)|(Two_Seasons_Ago)'))]
-  
-  opp_historical_cv_columns = all_cv_columns[str_detect(tolower(all_cv_columns), 'opp') & !str_detect(tolower(all_cv_columns), 'team') & (str_detect(tolower(all_cv_columns), '(sum_)|(pct_)|(rank_)|(avg_)|(median_)|(sd_)|(max_)|(min_)|(cumulative_)|(cv_)|(per_)|(seasons_ago)|(last_season)|(last3)|(lag)[0-9]') | str_detect(tolower(all_cv_columns), '(sum_)|(avg_)|(rank_)|(_pct)|(_median)|(sd_)|(max_)|(min_)|(cumulative_)(cv_)|'))]
-  opp_historical_cv_current_season = opp_historical_cv_columns[-which(str_detect(opp_historical_cv_columns, '(Last_Season)|(Two_Seasons_Ago)'))]
-  opp_historical_cv_recent_seasons = opp_historical_cv_columns[which(str_detect(opp_historical_cv_columns, '(Last_Season)|(Two_Seasons_Ago)'))]
-  
-  column_categories[[current_season_column_category]] = c(column_categories[[current_season_column_category]], player_historical_cv_current_season)
-  column_categories[[historical_season_column_category]] = c(column_categories[[historical_season_column_category]], player_historical_cv_recent_seasons)
-  column_categories[[which(str_detect(names(column_categories), 'team_current_season'))]]= c(column_categories[[which(str_detect(names(column_categories), 'team_current_season'))]], team_historical_cv_current_season)
-  column_categories[[which(str_detect(names(column_categories), 'team_historical_seasons'))]] = c(column_categories[[which(str_detect(names(column_categories), 'team_historical_seasons'))]], team_historical_cv_recent_seasons)
-  column_categories[[which(str_detect(names(column_categories), 'opp_current_season'))]] = c(column_categories[[which(str_detect(names(column_categories), 'opp_current_season'))]], opp_historical_cv_current_season)
-  column_categories[[which(str_detect(names(column_categories), 'opp_historical_seasons'))]] = c(column_categories[[which(str_detect(names(column_categories), 'opp_historical_seasons'))]], opp_historical_cv_recent_seasons)
   
   if (any(!is.na(numbers)))
   {
-    response_var_list = paste0(response_var, '_', numbers)
+    response_var_list = paste0(response_var, '_', gsub('-', 'minus', numbers))
     data_to_prep = create_data_with_response_variables(data_to_prep, numbers, response_var = response_var)
+    data_to_prep[[response_var]] = as.factor(data_to_prep[[response_var]])
   } else {
     response_var_list = response_var
+    data_to_prep[response_var] = as.numeric(data_to_prep[[response_var]])
   }
+  
   
   if(split_method == 'random')
   {
@@ -82,37 +51,15 @@ model_prep = function(data_to_prep, numbers, response_var, current_season_column
     # final_test = data_to_prep[final_test_indices,]
   }
   
-  
-  #categorical IV
-  
-  
-  #numeric (non-stats) IV
-  
-  
-  #stats IV
-  
-  #3 categories: opportunity, production, efficiency
-  #timeframe: This season, last 3, last season, 2 seasons ago
-  #scope: Player stats, player rank, team stats, team rank, opp stats, opp rank.
-  
-  
   column_categories_df = categorize_stats_fields(column_categories, column_category_current = current_season_column_category,
                                                  past_season_column_category = historical_season_column_category) %>% distinct() %>% select(-any_of(paste0(response_var, c('_lag1','_lag2','_lag3'))))
-  #lag columns were removed from the IV tournament; make sure that they are included in the model.
-  
-  
-  
-  
+
   #information value:
   
-  exclude_from_model = c(column_categories$identifiers, 'jersey_number', 'latest_team', 'draft_team', 'opponent_team', 'gameday', 'team_qb_id', 'team_coach')
-  exclude_from_information_value = c(exclude_from_model, column_categories$injuries, column_categories$usage_and_depth, column_categories$past_season_usage_and_depth, column_categories$playoff_clinching, column_categories$blue_chip, column_categories$matchup_history, column_categories$team_matchup_data, 'home_stadium', 'long_travel', 'opp_long_travel', 'div_game', 'long_week', 'opp_long_week', 'opp_long_week', 'opp_long_travel', 'team_last_week_ot_road', 'game_on_birthday', 'neutral_field', 'week')
+  exclude_from_model = c(column_categories$identifiers, 'jersey_number', 'latest_team', 'draft_team', 'opponent_team', 'gameday', 'team_qb_id', 'team_coach', "opp_offense_coach", "opp_offense_qb_id")
+  exclude_from_information_value = c(exclude_from_model, 'coach_previous_weeks_with_team', "opp_coach_previous_weeks_with_team", column_categories$injuries, column_categories$usage_and_depth, column_categories$past_season_usage_and_depth, column_categories$playoff_clinching, column_categories$blue_chip, column_categories$matchup_history, column_categories$team_matchup_data, 'home_stadium', 'long_travel', 'opp_long_travel', 'div_game', 'long_week', 'opp_long_week', 'opp_long_week', 'opp_short_week', 'team_last_week_ot_road', 'game_on_birthday', 'neutral_field', 'week')
   
-  list_training_data = list()
-  list_test_data = list()
-  #list_final_test_data = list()
-  
-  
+  this_response_df_list = list()
   
   for(r in response_var_list)
   {
@@ -260,7 +207,7 @@ model_prep = function(data_to_prep, numbers, response_var, current_season_column
     } else {
       
       print('creating IVs and bins...')
-      ivs_and_bins = create_iv_tables(df = this_response_df, r = r, var_list = setdiff(colnames(this_response_df), c(exclude_from_information_value, column_categories_df$Stat, colnames(this_response_df)[which(str_detect(colnames(this_response_df), gsub('_[0-9]+','',r)))])), column_categories = column_categories, specific_bins = TRUE)
+      ivs_and_bins = create_iv_tables(df = this_response_df, r = r, var_list = setdiff(colnames(this_response_df), c(exclude_from_information_value, column_categories_df$Stat, colnames(this_response_df)[which(str_detect(colnames(this_response_df), gsub('_[0-9]+|','',r)))], unlist(response_var_list))), column_categories = column_categories, specific_bins = TRUE)
       ivs = ivs_and_bins[[1]]
       bins = ivs_and_bins[[2]]
       this_or_that_table = this_or_that_results(ivs = ivs, this_or_that = this_or_that, r = r) %>%
@@ -272,7 +219,7 @@ model_prep = function(data_to_prep, numbers, response_var, current_season_column
       fields_to_use_bins = bins %>% filter(Predictive_Power  %in% c('Suspicious', 'High', 'Medium') & class =='character' & pct_missing < 0.5 & unique_vals > 10) %>% pull(Variable) %>% unique()
       fields_to_use_as_is =  bins %>% filter(Predictive_Power %in% c('Suspicious', 'High', 'Medium')  & !(class =='character' & pct_missing < 0.5 & unique_vals > 10)) %>% pull(Variable) %>% unique()
   
-      all_stat_fields = rbind()
+      all_stats_fields = rbind()
       for(scope in unique(column_categories_df$scope))
       {
         print(scope)
@@ -289,25 +236,27 @@ model_prep = function(data_to_prep, numbers, response_var, current_season_column
           
           if(nrow(column_categories_player_stats_with_iv) > 0)
           {
-            stats_fields = rbind(stats_fields,
+            all_stats_fields = rbind(all_stats_fields,
                                  trim_columns_by_iv_correlation(columns_df = column_categories_player_stats_with_iv %>% filter(pct_missing < 0.5), train_df = this_response_df, num_winners_per_category = 10))
             
           }
         }
       } 
       
-      selected_fields = c(column_categories$identifiers, stats_fields$Stat, fields_to_use_as_is, fields_to_use_bins, setdiff(exclude_from_information_value, exclude_from_model), paste0(response_var, '_lag1'), paste0(response_var, '_lag2'), paste0(response_var, '_lag3'))
+      selected_fields = c(column_categories$identifiers, all_stats_fields$Stat, fields_to_use_as_is, fields_to_use_bins, setdiff(exclude_from_information_value, exclude_from_model), paste0(response_var, '_lag1'), paste0(response_var, '_lag2'), paste0(response_var, '_lag3'))
       
       print(paste('Fields that don\'t exist:', setdiff(selected_fields, colnames(this_response_df))))
       
-      #compile: lag fields, fields_to_use_bins, fields_to_use_bins_as_is, stats_fields, and lag fields.
-      #check why some of the stats fields came up in fields_to_use_as_is.
-      list_training_data[[r]] = this_response_df %>% select(r, any_of(selected_fields))
-      list_test_data[[r]] = this_response_df_test %>% select(r, any_of(selected_fields))
+      training_data = this_response_df %>% select(r, any_of(selected_fields))
+      test_data = this_response_df_test %>% select(r, any_of(selected_fields))
+      
+      training_data = training_data %>% iv_to_dummy(bins = bins %>% filter(Variable %in% fields_to_use_bins), r) %>% select(-any_of(fields_to_use_bins))
+      test_data = test_data %>% iv_to_dummy(bins = bins %>% filter(Variable %in% fields_to_use_bins), r) %>% select(-any_of(fields_to_use_bins))
+      
+      this_response_df_list[[r]] = list(training_data, test_data)
     }
   }
-  return(list_training_data)
-  return(list_test_data)
+  return(this_response_df_list)
 }
   
   

@@ -24,22 +24,106 @@ calculate_probability_ranges = function(df)
 }
 
 #df must have columns: ProbabilityRange, ProbabilityFloor, ProbabilityCeiling (as derived in the calculate_probability_ranges function), along with BetHit (true/false) indicating whether bet won
-assess_probability_ranges = function(df) {
-  return(df %>% group_by(ProbabilityRange, ProbabilityFloor, ProbabilityCeiling) %>%
-           summarise(PctWin = mean(BetHit), n = n()) %>%
-           mutate(Assessment = case_when(
-             n < 10 ~ 'Insufficient Data',
-             PctWin >= ProbabilityFloor & PctWin <= ProbabilityCeiling ~ 'Inside Target Range',
-             abs(PctWin - ProbabilityCeiling) < ProbabilityFloor*.1| abs(ProbabilityFloor - PctWin)  < ProbabilityFloor*.1 ~ 'Near Target Range',
-             .default = 'Bad'
-           )) %>% arrange(ProbabilityFloor) %>% ungroup() %>% select(-ProbabilityFloor, -ProbabilityCeiling))
+assess_probability_ranges = function(df, return_categories = TRUE) {
+  df = df %>% group_by(ProbabilityRange, ProbabilityFloor, ProbabilityCeiling) %>%
+    summarise(PctWin = mean(BetHit), n = n())
+  
+  if (return_categories)
+  {
+    assessments = df %>% mutate(Assessment = case_when(
+               n < 10 ~ 'Insufficient Data',
+               PctWin >= ProbabilityFloor & PctWin <= ProbabilityCeiling ~ 'Inside Target Range',
+               abs(PctWin - ProbabilityCeiling) < ProbabilityFloor*.1| abs(ProbabilityFloor - PctWin)  < ProbabilityFloor*.1 ~ 'Near Target Range',
+               .default = 'Bad'
+             )) %>% arrange(ProbabilityFloor) %>% ungroup() %>% select(-ProbabilityFloor, -ProbabilityCeiling)
+  } else {
+    assessments_df = df %>% mutate(DistanceFromRange = abs(PctWin - 0.5*(ProbabilityFloor+ProbabilityCeiling)),
+                                   WeightedAssessment = DistanceFromRange*n)
+    assessments = sum(assessments_df$WeightedAssessment,na.rm=T)/sum(assessments_df$n)
+  }
+  return(assessments)
 }
 
+calibration_score = function(model_probability, bet_hit) {
+  
+  df = data.frame(
+    Model_Probability = model_probability,
+    BetHit = as.numeric(bet_hit)
+  )
+  
+  df %>%
+    calculate_probability_ranges() %>%
+    assess_probability_ranges(return_categories = FALSE)
+}
+
+run_xgboost = function(train, test, response, combos = 20)
+{
+  train = train %>% ungroup() %>% select(-any_of(c(gsis_id, -team, -display_name)))
+  train[[response]]= as.factor(train[[response]])
+  train = train %>% mutate(across(where(is.logical), ~ as.factor(.x)))
+  test = test %>% ungroup() %>% select(-any_of(c(gsis_id, -team, -display_name)))
+  test[[response]] = as.factor(test[[response]])
+  test = test %>% mutate(across(where(is.logical), ~ as.factor(.x)))
+  
+  #XGBOOST
+  #create model spec:
+  xgb_spec = boost_tree(
+    trees = tune(),
+    tree_depth = tune(),
+    min_n = tune(),
+    learn_rate = tune()
+  ) %>% set_engine('xgboost') %>% set_mode('classification')
+  
+  #create grid:
+  xgb_grid = grid_space_filling(
+    trees(),
+    tree_depth(), 
+    min_n(),
+    learn_rate(),
+    size = combos #number of hyperparameter combinations to try
+  )
+  
+  xgb_recipe = recipe(response ~ ., train)  %>%
+    step_zv(all_predictors()) %>%
+    step_unknown(all_nominal_predictors(), new_level = "unknown") %>%
+    step_dummy(all_nominal_predictors(), one_hot = TRUE, sparse = 'no')
+  
+  xgb_workflow = workflow() %>% add_recipe(xgb_recipe) %>% add_model(xgb_spec)
+  
+  folds = vfold_cv(train, v = 5)
+  
+  my_metrics = metric_set(mn_log_loss)
+  
+  #tune:
+  set.seed(1)
+  xgb_res = tune_grid(
+    xgb_workflow,
+    resamples = folds,
+    grid = xgb_grid,
+    metrics = my_metrics
+  )
+  
+  best_params = select_best(xgb_res, metric = 'mn_log_loss')
+  
+  
+  final_xgb_workflow = finalize_workflow(
+    xgb_workflow,
+    best_params
+  )
+  
+  final_xgb_fit = fit(final_xgb_workflow, data = train)
+  
+  preds = predict(final_xgb_fit,test, type = 'prob')$.pred_1
+  actuals = as.numeric(test[[response]])-1
+  preds_df = data.frame(preds, actuals)
+  
+  return(list(final_xgb_workflow, best_params, preds_df))
+}
 
 categorize_stats_fields = function(column_categories, column_category_current, past_season_column_category)
 {
   
-  if(!is.na(column_category_current))
+  if(any(!is.na(column_category_current)))
   {
     player_stats_cols_df = data.frame(Stat = unlist(column_categories[c(column_category_current, "other_current_season_stats", "usage_and_depth")]),
                                       scope = 'Player Stats') %>%
@@ -56,7 +140,7 @@ categorize_stats_fields = function(column_categories, column_category_current, p
     rownames(player_stats_cols_df)= NULL
   }
 
-  if(!is.na(past_season_column_category))
+  if(any(!is.na(past_season_column_category)))
   {
     player_recent_seasons_stats_cols_df = data.frame(Stat = unlist(column_categories[c(past_season_column_category, "other_past_season_stats", "past_season_usage_and_depth")]),
                                                      scope = 'Player Stats') %>%
@@ -88,7 +172,7 @@ categorize_stats_fields = function(column_categories, column_category_current, p
              .default = 'Production'))
   rownames(team_current_stats_cols_df)= NULL
   
-  team_historical_season_stats_cols_df = data.frame(Stat = unlist(column_categories[str_detect(names(column_categories), 'team_historical_seasons')]),
+  team_historical_season_stats_cols_df = data.frame(Stat = unlist(column_categories[str_detect(names(column_categories), 'team_historical_season')]),
                                                     scope = 'Team Stats')
   
   team_historical_season_stats_cols_df = team_historical_season_stats_cols_df %>% 
@@ -112,7 +196,7 @@ categorize_stats_fields = function(column_categories, column_category_current, p
              .default = 'Production'))
   rownames(opp_current_stats_cols_df)= NULL
   
-  opp_historical_season_stats_cols_df = data.frame(Stat = unlist(column_categories[str_detect(names(column_categories), 'opp_historical_seasons')]),
+  opp_historical_season_stats_cols_df = data.frame(Stat = unlist(column_categories[str_detect(names(column_categories), 'opp_historical_season')]),
                                                    scope = 'Opp Stats')
 
   opp_historical_season_stats_cols_df = opp_historical_season_stats_cols_df %>% 
@@ -129,10 +213,10 @@ categorize_stats_fields = function(column_categories, column_category_current, p
     opp_current_stats_cols_df,
     opp_historical_season_stats_cols_df
   )
-  if (!is.na(column_category_current)) {
+  if (any(!is.na(column_category_current))) {
     stats_columns_table = rbind(stats_columns_table, player_stats_cols_df)
   }
-  if (!is.na(past_season_column_category)) {
+  if (any(!is.na(past_season_column_category))) {
     stats_columns_table = rbind(stats_columns_table, player_recent_seasons_stats_cols_df)
   }
 
@@ -148,7 +232,7 @@ trim_columns_by_iv_correlation = function(columns_df, train_df, num_winners_per_
     winners_df = rbind(winners_df, winners %>% select(Stat, StatType, Total_IV))
   }
   
-  if(nrow(winners_df) > 0)
+  if(nrow(winners_df) > num_winners_per_category)
   {
     cor_mat = cor(train_df %>% ungroup() %>% select(all_of(winners_df$Stat)), 
                   use = "pairwise.complete.obs")  %>% data.frame()
@@ -186,6 +270,8 @@ trim_columns_by_iv_correlation = function(columns_df, train_df, num_winners_per_
     }
     
     final_winners = winners_df %>% filter(!Stat %in% removal_list)
+  } else if (nrow(winners_df) > 0) {
+    final_winners = winners_df
   } else {
     final_winners = NULL
   }
