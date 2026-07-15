@@ -15,6 +15,8 @@ source('data_collection/scripts/get_playoff_clinching_data_script.R')
 #source('data_collection/scripts/nlp.R')
 source('data_collection/scripts/blue_chip_analysis.R')
 
+options(dplyr.summarise.inform = FALSE)
+
 t1 = Sys.time()
 
 print('Pulling team data...')
@@ -31,6 +33,8 @@ player_data_all = pull_all_player_stats(min_year, max_year, team_redzone_drives 
 player_data_combined = player_data_all[[1]]
 defense_data_combined = player_data_all[[2]]
 player_column_categories = player_data_all[[3]]
+rm(player_data_all)
+gc()
 
 column_categories = c(team_column_categories, player_column_categories)
 
