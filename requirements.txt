@@ -1,0 +1,11 @@
+pandas
+nfl-data-py
+pathlib
+datetime
+xgboost
+scikit-learn
+scipy
+keras
+joblib
+dotenv
+supabase
