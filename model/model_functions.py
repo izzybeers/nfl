@@ -20,6 +20,8 @@ from keras.callbacks import EarlyStopping
 import joblib
 from dotenv import load_dotenv
 from supabase import create_client, Client
+from scipy.optimize import minimize
+from statsmodels.stats.correlation_tools import cov_nearest
 
 load_dotenv()
 supabase: Client = create_client(os.getenv("supabase_endpoint"), os.getenv("supabase_api_key"))
@@ -562,3 +564,273 @@ def get_prediction_by_model_type(response, model_type, extra_calibration, root_f
                 each_model_pred.append(uncalibrated_neural_net_preds)   
         preds = pd.DataFrame(each_model_pred).apply(lambda col: np.mean(col), axis = 0)
     return preds
+
+
+#df must have column: ['EV_per_100'] (expected value payout on a $100 bet)
+def calculate_ev_ranges(df):
+    ev_categories = [
+        "Very High", 
+        "High", 
+        "A little high", 
+        "Slightly above break-even", 
+        "Slightly below break-even", 
+        "A little low", 
+        "Low", 
+        "Very Low", 
+        "Extremely Low"
+    ]
+    return df.assign(
+        EV_Range_group = lambda x: pd.Categorical(np.select(
+            [x['EV_per_100'] > 100, x['EV_per_100'] > 50, x['EV_per_100'] > 20, x['EV_per_100'] > 0, x['EV_per_100'] > -5, x['EV_per_100'] > -20, x['EV_per_100'] > -30, x['EV_per_100'] > -50],
+            ["Very High", "High", "A little high", "Slightly above break-even", "Slightly below break-even", "A little low", "Low", "Very Low"],
+            default = 'Extremely Low'),
+            categories = ev_categories, ordered = True
+    ))
+
+#df must have column ['Odds'] for the bet (american moneyline)
+def calculate_odds_ranges(df):
+    odds_categories = [
+        'Negative Odds',
+        'Positive Odds Up To +250',
+        'Odds +251 to +450',
+        'Odds +451 to +650',
+        'Odds +651 to +1000',
+        'Odds +1000 to +2000',
+        'Odds above +2000'
+    ]
+    return df.assign(
+        Odds_Range = lambda x: pd.Categorical(np.select(
+        [x['Odds'] < 0, x['Odds'] < 250, x['Odds'] < 450, x['Odds'] < 650, x['Odds'] < 1000, x['Odds'] < 2000],
+        ['Negative Odds',
+        'Positive Odds Up To +250',
+        'Odds +251 to +450',
+        'Odds +451 to +650',
+        'Odds +651 to +1000',
+        'Odds +1000 to +2000'],
+        default = 'Odds above +2000'
+    ),
+    categories = odds_categories, ordered = True))
+
+def get_optimized_by_gamma(mu, Sigma, max_bets, gamma = 1):
+        if not isinstance(mu, pd.Series):
+            mu = pd.Series(mu)
+        Sigma = pd.DataFrame(Sigma, index=mu.index, columns=mu.index)
+        valid = mu.notna() & np.isfinite(mu)
+        mu = mu.loc[valid]
+        Sigma = Sigma.loc[valid, valid]
+        n = len(mu)
+        if n == 0:
+            return None
+        Dmat = 2 * gamma * Sigma + 1e-8 * np.eye(n)
+        dvec = mu.to_numpy()
+        def objective(w):
+            return 0.5 * w @ Dmat @ w - dvec @ w
+        constraints = [
+            {
+                "type": "eq",
+                "fun": lambda w: np.sum(w) - 1
+            }
+        ]
+        bounds = [(0, None) for _ in range(n)]
+        w0 = np.repeat(1 / n, n)
+        try:
+            sol  = minimize(objective, w0, method = 'SLSQP', bounds = bounds, constraints = constraints)
+        except Exception as e:
+            print(e)
+            return None
+        if not sol.success:
+            return None
+        w = pd.Series(sol.x, index = mu.index)
+        if max_bets is None:
+            num_bets = len(w)
+        else:
+            num_bets = min(max_bets, len(w))
+        new_w = w.sort_values(ascending=False).head(num_bets)
+        if new_w.sum() <= 0:
+            return None
+        new_w = new_w / new_w.sum()
+        return new_w
+
+#make sure the df is already f  iltered on Odds range, risk range, manual player removal, etc
+def get_optimal_portfolio(df, correlations, max_bets = None):
+    required_cols = ['response_var', 'Model_Probability', 'Odds', 'Position', 'Week', 'label', 'team', 'opponent_team']
+    if not set(required_cols).issubset(df.columns):
+        raise Exception (f"The parameter df must contain the following columns: {', '.join(required_cols)}")
+    df = df.assign(Odds = lambda x: pd.to_numeric(x['Odds'], errors='coerce'),
+                   ProfitPer100 = lambda x: np.where(x['Odds'] > 0, x['Odds'], 100**2/(-1*x['Odds'])),
+                   EVProfitPer100 = lambda x: x['Model_Probability']*x['ProfitPer100'] - 100*(1-x['Model_Probability']),
+                   Type = lambda x: np.where(
+                    x['response_var'].isin(['anytime_td_scorer', 'team_win']),
+                    x['response_var'],
+                    x['response_var'].str.rsplit('_',n=1).str[0]
+                   ),
+                   Risk_Raw = lambda x: x['Model_Probability']*(1 - x['Model_Probability'])*(x['ProfitPer100']/100 + 1)**2,
+                   Risk_Score = lambda x: x['Risk_Raw']).query('EVProfitPer100 > 0')
+                #  update risk for bin reliability when available
+    df_with_calculations = []
+    for w in np.unique(df['Week']):
+        print(f"Running portfolio for week {w}")
+        df_this_week = df.query('Week == @w').copy()
+        df_this_week.index = df_this_week['label'] + ' ' + df_this_week['response_var']
+        cov_matrix = pd.DataFrame(
+                        np.zeros((len(df_this_week), len(df_this_week)), dtype=float),
+                        index=df_this_week.index,
+                        columns=df_this_week.index
+                    )
+        print('Calculating correlations and risk scores...')
+        for i in range(len(cov_matrix)):
+            for j in range(len(cov_matrix)):
+                if i == j:
+                    cov_matrix.iloc[i,j] = df_this_week['Risk_Score'].iloc[i]
+                else:
+                #if player is the same: correlation = 1
+                #if player fits in one of the correlation categories, assign the correct correlation based on the correlations spreadsheet
+                #otherwise, correlation = 0
+                    if (df_this_week['label'].iloc[i] == df_this_week['label'].iloc[j]) & (df_this_week['Type'].iloc[i] == df_this_week['Type'].iloc[j]):
+                        cor = 1
+                    #same player, different bet type:
+                    elif (df_this_week['label'].iloc[i] == df_this_week['label'].iloc[j]) & (df_this_week['Type'].iloc[i] != df_this_week['Type'].iloc[j]):
+                        type_i = df_this_week['Type'].iloc[i]
+                        type_j = df_this_week['Type'].iloc[j]
+                        sub = correlations[
+                            (correlations['Correlation_Type'] == 'same_player') &
+                            (
+                                ((correlations['Var1'] == type_i) & (correlations['Var2'] == type_j)) |
+                                ((correlations['Var1'] == type_j) & (correlations['Var2'] == type_i))
+                            )
+                        ]
+                        cor = 0 if sub.empty else sub['Cor'].iloc[0]
+                    #same team:
+                    elif df_this_week['team'].iloc[i] == df_this_week['team'].iloc[j]:
+                        pos_i = str(df_this_week['Position'].iloc[i])
+                        pos_j = str(df_this_week['Position'].iloc[j])
+                        sub = correlations[
+                            (correlations['Correlation_Type'] == 'same_team') &
+                            (correlations['Var1'] == df_this_week['Type'].iloc[i]) &
+                            (correlations['Var2'] == df_this_week['Type'].iloc[j])
+                        ]
+                        if not sub.empty and {'Position1', 'Position2'}.issubset(sub.columns):
+                            sub = sub[
+                                sub.apply(
+                                    lambda row:
+                                        (pd.isna(row['Position1']) or pos_i in str(row['Position1'])) and
+                                        (pd.isna(row['Position2']) or pos_j in str(row['Position2'])),
+                                    axis=1
+                                )
+                            ]
+                        cor = 0 if sub.empty else sub['Cor'].iloc[0]
+                    #opposing teams:
+                    elif df_this_week['team'].iloc[i] == df_this_week['opponent_team'].iloc[j]:
+                        pos_i = str(df_this_week['Position'].iloc[i])
+                        pos_j = str(df_this_week['Position'].iloc[j])
+                        sub = correlations[
+                            (correlations['Correlation_Type'] == 'opp_team') &
+                            (correlations['Var1'] == df_this_week['Type'].iloc[i]) &
+                            (correlations['Var2'] == df_this_week['Type'].iloc[j])
+                        ]
+                        if not sub.empty and {'Position1', 'Position2'}.issubset(sub.columns):
+                            sub = sub[
+                                sub.apply(
+                                    lambda row:
+                                        (pd.isna(row['Position1']) or pos_i in str(row['Position1'])) and
+                                        (pd.isna(row['Position2']) or pos_j in str(row['Position2'])),
+                                    axis=1
+                                )
+                            ]
+                        cor = 0 if sub.empty else sub['Cor'].iloc[0]
+                    #unrelated games:
+                    else:
+                        cor = 0
+                    cov_matrix.iloc[i, j] = (cor * np.sqrt(df_this_week['Risk_Score'].iloc[i])* np.sqrt(df_this_week['Risk_Score'].iloc[j]))
+
+        print('Estimating Sigma...')
+        mu = df_this_week['EVProfitPer100']/100
+        mu.index = cov_matrix.columns
+        Sigma = (cov_matrix + cov_matrix.T) / 2
+        Sigma = Sigma.astype(float)
+        eigvals = np.linalg.eigvalsh(Sigma.to_numpy())
+        min_eig = eigvals.min()
+        if min_eig > -1e-8:
+            # Matrix is already PSD up to floating-point noise.
+            # Add tiny ridge to make it strictly positive definite.
+            Sigma = Sigma + np.eye(len(Sigma)) * 1e-8
+        else:
+            # Real PSD problem; use nearPD fallback.
+            try:
+                Sigma = pd.DataFrame(
+                    cov_nearest(Sigma.to_numpy(), method="nearest", threshold=1e-10),
+                    index=Sigma.index,
+                    columns=Sigma.columns
+                )
+            except np.linalg.LinAlgError:
+                Sigma = pd.DataFrame(
+                    cov_nearest(Sigma.to_numpy(), method="clipped", threshold=1e-10),
+                    index=Sigma.index,
+                    columns=Sigma.columns
+                )
+        gammas = 10 ** np.linspace(-3, 3, 100)
+
+        n = len(mu)
+        max_bets_this_week = n if max_bets is None else min(max_bets, n)
+        if n == 1:
+            selected_rows = df_this_week.copy()
+            selected_rows['Portfolio_Weight'] = 1.0
+            selected_rows['Portfolio_Mu'] = mu.iloc[0]
+            selected_rows['Portfolio_Var'] = Sigma.iloc[0, 0]
+            selected_rows['Portfolio_SD'] = np.sqrt(Sigma.iloc[0, 0])
+            selected_rows['Portfolio_Sharpe'] = (
+                selected_rows['Portfolio_Mu'].iloc[0] / selected_rows['Portfolio_SD'].iloc[0]
+                if selected_rows['Portfolio_SD'].iloc[0] > 0
+                else np.nan
+            )
+            df_with_calculations.append(selected_rows)
+            continue
+        
+        print('Calculating weights...')
+        weights = [get_optimized_by_gamma(mu, Sigma, max_bets_this_week, gamma = g) for g in gammas]
+
+        mu_vec = np.full(len(gammas), np.nan)
+        sd_vec = np.full(len(gammas), np.nan)
+        sharpe_vec = np.full(len(gammas), np.nan)
+
+        full_weights_list = []
+
+        for wgt in range(len(weights)):
+            these_weights = weights[wgt]
+            if these_weights is not None and these_weights.notna().all():
+                mu_portfolio = sum(these_weights * mu[these_weights.index])
+                var_portfolio = these_weights.to_numpy() @ Sigma.loc[these_weights.index, these_weights.index].to_numpy() @ these_weights.to_numpy()
+                sd_portfolio = np.sqrt(var_portfolio)
+                sharpe_val = mu_portfolio / sd_portfolio if sd_portfolio > 0 else np.nan
+                mu_vec[wgt]     = mu_portfolio
+                sd_vec[wgt]     = sd_portfolio
+                sharpe_vec[wgt] = sharpe_val
+                
+                weights_df = these_weights.to_frame('Portfolio_Weight')
+                bet_rows = df_this_week.loc[weights_df.index].copy()
+                
+                full_weights_list.append({
+                    'weights': weights_df,
+                    'bet_rows': bet_rows,
+                    'mu': mu_portfolio,
+                    'var': var_portfolio,
+                    'sd': sd_portfolio,
+                    'sharpe': sharpe_val
+                })
+        if len(full_weights_list) == 0:
+            continue
+        
+        best_indx = np.nanargmax([x['sharpe'] for x in full_weights_list])
+        best_portfolio = full_weights_list[best_indx]
+        selected_rows = best_portfolio['bet_rows'].copy()
+        selected_rows['Portfolio_Weight'] = best_portfolio['weights']['Portfolio_Weight']
+        selected_rows['Portfolio_Mu'] = best_portfolio['mu']
+        selected_rows['Portfolio_Var'] = best_portfolio['var']
+        selected_rows['Portfolio_SD'] = best_portfolio['sd']
+        selected_rows['Portfolio_Sharpe'] = best_portfolio['sharpe']
+
+    if len(df_with_calculations) == 0:
+        return pd.DataFrame()
+
+    return pd.concat(df_with_calculations, axis=0).reset_index(drop=True)
+                    

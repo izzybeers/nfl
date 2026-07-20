@@ -63,6 +63,30 @@ get_supabase_data = function(schema, table_name, additional_sql = '', select = '
   return(fromJSON(content(response, 'text', encoding = 'UTF-8')))
 }
 
+
+write_to_supabase = function(schema, table_name, df)
+{
+  url = paste0(SUPABASE_URL, "/rest/v1/", table_name)
+  body_data = toJSON(df, dataframe = "rows", auto_unbox = TRUE)
+  response = POST(
+    url,
+    add_headers(
+      "apikey" = SUPABASE_KEY,
+      "Authorization" = paste("Bearer", SUPABASE_KEY),
+      "Content-Type" = "application/json",
+      "Content-Profile" = schema,          # Use Content-Profile for POST/PATCH
+      "Prefer" = "return=minimal"          # Speeds up request by not returning the inserted rows
+    ),
+    body = body_data
+  )
+  if (http_error(response)) {
+    stop(paste("Failed to write to Supabase:", content(response, "text", encoding = "UTF-8")))
+  } else {
+    print(paste("Successfully wrote", nrow(df), "rows to", table_name))
+    return(TRUE)
+  }
+}
+
 clean_names = function(name)
 {
   return(tolower(name) %>% str_remove_all("[[:punct:]]+") %>% str_remove("\\b(jr|sr|i{1,3}|iv|v|vi{1,3}|ix|x|xi{1,3})\\b") %>% str_squish() %>% trimws())
