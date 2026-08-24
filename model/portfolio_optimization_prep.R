@@ -3,8 +3,7 @@
 library(stringr)
 library(dplyr)
 library(purrr)
-source('global.R')
-setwd('~/nfl')
+setwd("~/Documents/nfl")
 
 min_year = 2020
 max_year = 2025
@@ -20,7 +19,7 @@ gamelogs = load_player_stats(seasons = min_year:max_year) %>%
 
 
 #quarterbacks:
-qbs_passing = gamelogs %>% filter(!is.na(passing_yards)) %>% select(label, team, opponent, season, week, passing_yards)
+qbs_passing = gamelogs %>% filter(!is.na(passing_yards) & position_group == "QB") %>% select(label, team, opponent, season, week, passing_yards)
 
 qbs_rushing = gamelogs %>% filter(!is.na(rushing_yards) & str_detect(position_group, "QB")) %>% select(label, team, opponent, season, week, rushing_yards)
 
@@ -29,11 +28,11 @@ qb_td = gamelogs %>% filter(!is.na(anytime_td_scorer) & str_detect(position_grou
 # non-RB non-QB (WR, TE, etc.)
 wr_rush = gamelogs %>% filter(!is.na(rushing_yards) & !str_detect(position_group, "QB|RB")) %>% select(label, team, opponent, season, week, rushing_yards)
 
-wr_rec = gamelogs %>% filter(!is.na(receiving_yards) & !str_detect(position_group, "RB")) %>% select(label, team, opponent, season, week, receiving_yards)
+wr_rec = gamelogs %>% filter(!is.na(receiving_yards) & !str_detect(position_group, "RB|QB")) %>% select(label, team, opponent, season, week, receiving_yards)
 
-wr_receptions = gamelogs %>% filter(!is.na(receptions) & !str_detect(position_group, "RB")) %>% select(label, team, opponent, season, week, receptions)
+wr_receptions = gamelogs %>% filter(!is.na(receptions) & !str_detect(position_group, "RB|QB")) %>% select(label, team, opponent, season, week, receptions)
 
-wr_rush_rec = gamelogs %>% filter(!is.na(receiving_yards) & !is.na(rushing_yards) & !str_detect(position_group, "RB")) %>% select(label, team, opponent, season, week, rushing_receiving_yards)
+wr_rush_rec = gamelogs %>% filter(!is.na(receiving_yards) & !is.na(rushing_yards) & !str_detect(position_group, "RB|QB")) %>% select(label, team, opponent, season, week, rushing_receiving_yards)
 
 wr_td = gamelogs %>% filter(!is.na(anytime_td_scorer) & !str_detect(position_group, "QB|RB")) %>% select(label, team, opponent, season, week, anytime_td_scorer)
 
@@ -175,4 +174,4 @@ corrs$Cor = as.numeric(corrs$Cor)
 
 # write.csv(corrs, 'correlations_up_to_2024.csv')
 
-write_to_supabase('MainData', 'Correlations', corrs %>% mutate(min_year = 2020, max_year = 2025, created_at = Sys.time(), min_year = min_year, max_year = max_year))
+write_to_supabase('MainData', 'Correlations', corrs %>% mutate(min_year = min_year, max_year = max_year, created_at = Sys.time()))
