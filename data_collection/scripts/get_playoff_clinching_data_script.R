@@ -42,7 +42,9 @@ get_html_content = function(url, max_retries = 3, skip_to_chromote = FALSE, extr
       return(page)  # Success — exit function
     })
     
-    if (!is.null(try_result)) return(try_result)
+    if (!inherits(try_result, "try-error")) {
+      return(try_result)
+    }
     
     # Only wait if both methods failed
     wait_time <- runif(1, 2, 4)
@@ -299,8 +301,39 @@ get_playoff_clinching_data = function(min_year, max_year, wk = NULL, predict_mod
   }
   
   
-  full_playoff_clinching_table_all_years = bind_rows(future_map(.x = (min_year:max_year),
-                                                                .f = playoff_data_by_year))
+  full_playoff_clinching_table_all_years = bind_rows(
+    future_map(.x = (min_year:max_year), .f = function(y) {
+        tryCatch(
+          playoff_data_by_year(y),
+          error = function(e) {
+            message(
+              paste("Error pulling playoff clinching data for", y, ":", e$message)
+            )
+            if (predict_mode) {
+              return(
+                data.frame(
+                  Season = y,
+                  Week = wk,
+                  Team = NA,
+                  Div_Ranking = as.numeric(NA),
+                  Div_Pct_Wins = as.numeric(NA),
+                  Already_Clinched_Playoff = as.numeric(NA),
+                  Already_Clinched_Division = as.numeric(NA),
+                  Already_Clinched_Seed1 = as.numeric(NA),
+                  Already_Eliminated = as.numeric(NA),
+                  Already_Eliminated_Division = as.numeric(NA),
+                  playoffs_at_stake = as.numeric(NA),
+                  elimination_at_stake = as.numeric(NA)
+                )
+              )
+            }
+            
+            return(NULL)
+          }
+        )
+      }
+    )
+  )
   
   
   return(full_playoff_clinching_table_all_years)

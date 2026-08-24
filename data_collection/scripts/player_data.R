@@ -1,13 +1,81 @@
 
-get_player_data = function(min_year, max_year, team_redzone_drives, schedules_data)
+get_player_info = function(min_year, max_year)
 {
   
   column_categories = list()
   
-  player_bios = load_players() %>% filter((position_group %in% c('QB', 'RB', 'WR', 'TE') | ngs_position_group %in% c('QB', 'RB', 'WR', 'TE')) & (last_season >= min_year)) %>%
-    select(display_name, position, position_group, ngs_position_group, birth_date, height, weight, college_name, college_conference, jersey_number, rookie_season, draft_year, latest_team, draft_round, draft_pick, draft_team, gsis_id, esb_id, nfl_id, pfr_id, pff_id, otc_id, espn_id, smart_id)
+  player_bios = load_players(file_type = 'csv') %>% filter((position_group %in% c('QB', 'RB', 'WR', 'TE') | ngs_position_group %in% c('QB', 'RB', 'WR', 'TE')) & (last_season >= min_year)) %>%
+    select(display_name, position, position_group, ngs_position_group, birth_date, height, weight, jersey_number, rookie_season, latest_team, draft_round, draft_pick, draft_team, draft_year, college_name, college_conference, gsis_id, esb_id, nfl_id, pfr_id, pff_id, otc_id, espn_id, smart_id)
   
-  #these tables use gsis_id to join:
+  time_spent_with_team = load_rosters_weekly(min_year:max_year) %>%
+    filter(gsis_id != '') %>%
+    select(season, week, gsis_id, team) %>%
+    arrange(gsis_id, season, week) %>%
+    group_by(gsis_id) %>% 
+    mutate( weeks_on_current_team = sequence(rle(as.character(team))$lengths),
+            is_midseason_arrival = coalesce((team != lag(team)) & (season == lag(season)), FALSE)
+    ) %>%
+    group_by(gsis_id, team) %>%
+    mutate(first_season_with_team = min(season)) %>%
+    ungroup() %>%
+    mutate(is_first_year_with_team = season == first_season_with_team) %>% select(-first_season_with_team)
+  
+  depth_charts_raw = load_depth_charts(min_year:max_year) 
+  if ('season' %in% colnames(depth_charts_raw))
+  {
+    depth_charts = load_depth_charts(min_year:max_year) %>%
+      mutate(season = case_when(
+        !is.na(season) ~ season,
+        month(dt) %in% c(3,4,5,6,7,8,9,10,11,12) ~ year(dt),
+        month(dt) %in% c(1,2) ~ year(dt) - 1,
+        .default = NA),
+        dt = as.POSIXct(dt),
+        team = ifelse(is.na(team), club_code, team),
+        depth_rank = ifelse(!is.na(depth_team), depth_team, pos_rank)) %>%
+      left_join(week_dates, join_by('season', 'dt' <= 'week_end', 'dt' >= 'week_start', 'team')) %>%
+      mutate(week = ifelse(is.na(week.x), week.y, week.x)) %>%
+      filter(!is.na(week) & !is.na(depth_rank)) %>%
+      group_by(gsis_id, season, week) %>% arrange(desc(dt)) %>% slice(1) %>% ungroup() %>% #get the latest depth chart info for a player in a week
+      select(gsis_id, team, season, week, depth_rank) 
+  } else {
+    depth_charts = load_depth_charts(min_year:max_year) %>%
+      mutate(season = case_when(
+        month(dt) %in% c(3,4,5,6,7,8,9,10,11,12) ~ year(dt),
+        month(dt) %in% c(1,2) ~ year(dt) - 1,
+        .default = NA),
+        dt = as.POSIXct(dt),
+        team = ifelse(is.na(team), club_code, team),
+        depth_rank = pos_rank) %>%
+      left_join(week_dates, join_by('season', 'dt' <= 'week_end', 'dt' >= 'week_start', 'team')) %>%
+      filter(!is.na(week) & !is.na(depth_rank)) %>%
+      group_by(gsis_id, season, week) %>% arrange(desc(dt)) %>% slice(1) %>% ungroup() %>% #get the latest depth chart info for a player in a week
+      select(gsis_id, team, season, week, depth_rank) 
+  }
+  
+  
+  column_categories[['identifiers']] = c(
+    'season', 'team', 'game_id', 'gsis_id', 'display_name', 'jersey_number'
+  )
+  
+  column_categories[['bio_data']] = setdiff(colnames(player_bios)[!str_detect(colnames(player_bios), '_id')], c(column_categories[['identifiers']], 'birth_date'))
+  
+  column_categories[['usage_and_depth']] = c(
+    'games_played', 'games_played_this_season',
+    setdiff(colnames(depth_charts), c(column_categories[['identifiers']], 'week')),
+    setdiff(colnames(time_spent_with_team), c(column_categories[['identifiers']], 'week'))
+  )
+  
+  player_info = player_bios %>% left_join(depth_charts, join_by('gsis_id')) %>% left_join(time_spent_with_team, join_by('season', 'gsis_id','week','team'))
+
+  return(list(
+    player_info, column_categories,
+    player_bios, time_spent_with_team, depth_charts
+  ))
+}
+
+
+get_player_raw_stats = function(min_year, max_year, team_redzone_drives, schedules_data)
+{
   passing_extra_stats = load_nextgen_stats(seasons = min_year:max_year, stat_type = 'passing') %>%
     mutate(total_time_to_throw = avg_time_to_throw*attempts,
            total_completed_air_yards = avg_completed_air_yards*completions,
@@ -48,7 +116,12 @@ get_player_data = function(min_year, max_year, team_redzone_drives, schedules_da
                                             team_total_passing_yards = sum(passing_yards, na.rm=T),
                                             team_total_passing_attempts = sum(attempts, na.rm=T),
                                             team_total_air_yards = sum(passing_air_yards, na.rm=T),
-                                            team_total_intended_air_yards = sum(total_intended_air_yards)) %>% ungroup()
+                                            team_total_intended_air_yards =
+                                              if (all(is.na(total_intended_air_yards))) {
+                                                NA_real_
+                                              } else {
+                                                sum(total_intended_air_yards, na.rm = TRUE)
+                                              }) %>% ungroup()
   
   defense_and_kickers = load_players() %>% filter(position %in% c('DE','DT','DL','LB','OLB','NT','MLB','ILB','CB','FS','S','SAF','DB') & (last_season >= min_year)) %>% select(gsis_id, pfr_id)
   
@@ -65,30 +138,17 @@ get_player_data = function(min_year, max_year, team_redzone_drives, schedules_da
   play_details = load_pbp((max(min_year,2022)):max_year)  %>% filter(!is.na(posteam))
   
   #nflverse game id and gsis player id:
-  receiver_pbp_data = play_details %>% filter(!is.na(receiver_player_id)) %>%
+  receiver_pbp_data = play_details %>% filter(!is.na(receiver_player_id), play_type == 'pass') %>%
     left_join(load_ftn_charting(max(min_year,2022):max_year) %>% select(-season, -week, -ftn_play_id), join_by( 'play_id'== 'nflverse_play_id', 'game_id' == 'nflverse_game_id')) %>%
     group_by(season, week, receiver_player_id, posteam) %>%
     summarise(catchable_balls = sum(is_catchable_ball, na.rm = TRUE),
-           catchable_balls_caught = sum(is_catchable_ball & complete_pass, na.rm = TRUE),
-           redzone_targets = sum(!is.na(receiver_player_id) & yardline_100 < 20), .groups = "drop"
+              catchable_balls_caught = sum(is_catchable_ball & complete_pass, na.rm = TRUE),
+              redzone_targets = sum(!is.na(receiver_player_id) & yardline_100 < 20, na.rm=TRUE), .groups = "drop"
     )
   
-  rusher_pbp_data = play_details %>% filter(!is.na(rusher_player_id)) %>% filter(yardline_100 < 20) %>%
+  rusher_pbp_data = play_details %>% filter(!is.na(rusher_player_id), yardline_100 < 20, play_type == "run") %>%
     group_by(season, week, rusher_player_id, posteam) %>%
     summarise(redzone_carries = n(), .groups = "drop")
-  
-  time_spent_with_team = load_rosters_weekly(min_year:max_year) %>%
-    filter(gsis_id != '') %>%
-    select(season, week, gsis_id, team) %>%
-    arrange(gsis_id, season, week) %>%
-    group_by(gsis_id) %>% 
-    mutate( weeks_on_current_team = sequence(rle(as.character(team))$lengths),
-            is_midseason_arrival = coalesce((team != lag(team)) & (season == lag(season)), FALSE)
-    ) %>%
-    group_by(gsis_id, team) %>%
-    mutate(first_season_with_team = min(season)) %>%
-    ungroup() %>%
-    mutate(is_first_year_with_team = season == first_season_with_team) %>% select(-first_season_with_team)
   
   #uses pfr id to join:
   snaps_data = load_snap_counts(seasons = min_year:max_year)  %>%
@@ -104,29 +164,11 @@ get_player_data = function(min_year, max_year, team_redzone_drives, schedules_da
   player_advanced_receiving = load_pfr_advstats(min_year:max_year, stat_type = 'rec') %>% select(pfr_player_id, season, week, team, receiving_broken_tackles, receiving_drop, receiving_int)
   
   player_adv_stats = player_advanced_passing %>% full_join(player_advanced_rushing, join_by('pfr_player_id', 'season', 'week', 'team')) %>% full_join(player_advanced_receiving, join_by('pfr_player_id', 'season', 'week', 'team'))
-  #group this by game to get some high level game stats per player:
-  #Roll up by team/game.
   
-  
-  depth_charts = load_depth_charts(min_year:max_year) %>%
-    mutate(season = case_when(
-      !is.na(season) ~ season,
-      month(dt) %in% c(3,4,5,6,7,8,9,10,11,12) ~ year(dt),
-      month(dt) %in% c(1,2) ~ year(dt) - 1,
-      .default = NA),
-      dt = as.POSIXct(dt),
-      team = ifelse(is.na(team), club_code, team),
-      depth_rank = ifelse(!is.na(depth_team), depth_team, pos_rank)) %>%
-    left_join(week_dates, join_by('season', 'dt' <= 'week_end', 'dt' >= 'week_start', 'team')) %>%
-    mutate(week = ifelse(is.na(week.x), week.y, week.x)) %>%
-    filter(!is.na(week) & !is.na(depth_rank)) %>%
-    group_by(gsis_id, team, season, week) %>% arrange(desc(dt)) %>% slice(1) %>% ungroup() %>% #get the latest depth chart info for a player in a week
-    select(gsis_id, team, season, week, depth_rank) 
-  
-  
-  data = player_bios %>%
-    inner_join(snaps_data, join_by('pfr_id' == 'pfr_player_id')) %>% filter(offense_pct > 0) %>%
-    left_join(playergl, join_by('gsis_id' == 'player_id', 'season', 'week', 'team')) %>%
+  offense_data = playergl %>% rename(gsis_id = player_id) %>%
+    left_join(receiver_pbp_data, join_by('gsis_id' == 'receiver_player_id', 'team' == 'posteam', 'season', 'week')) %>%
+    left_join(rusher_pbp_data, join_by('gsis_id' == 'rusher_player_id', 'team' == 'posteam', 'season', 'week')) %>%
+    left_join(team_redzone_drives, join_by('team' == 'posteam', 'season', 'week')) %>%
     mutate(
       carries = coalesce(carries, 0),
       targets = coalesce(targets, 0),
@@ -138,83 +180,16 @@ get_player_data = function(min_year, max_year, team_redzone_drives, schedules_da
       passing_tds = coalesce(passing_tds, 0),
       rushing_tds = coalesce(rushing_tds, 0),
       receiving_tds = coalesce(receiving_tds, 0)
-    ) %>%
-    group_by(gsis_id) %>% arrange(season, week) %>% mutate(games_played = (row_number()-1)) %>%
-    ungroup() %>%
-    group_by(gsis_id, season) %>% arrange(week) %>% mutate(games_played_this_season = (row_number() - 1)) %>%
-    ungroup() %>%
-    left_join(receiver_pbp_data, join_by('gsis_id' == 'receiver_player_id', 'team' == 'posteam', 'season', 'week')) %>%
-    left_join(rusher_pbp_data, join_by('gsis_id' == 'rusher_player_id', 'team' == 'posteam', 'season', 'week')) %>%
-    left_join(team_redzone_drives, join_by('team' == 'posteam', 'season', 'week')) %>%
-    left_join(time_spent_with_team, join_by('gsis_id', 'season', 'week', 'team')) %>%
-    left_join(player_adv_stats, join_by('pfr_id' == 'pfr_player_id', 'season', 'week', 'team')) %>%
-    left_join(depth_charts, join_by('gsis_id', 'team', 'season', 'week')) %>%
-    mutate(tds = rushing_tds + receiving_tds + special_teams_tds,
-           anytime_td_scorer = tds > 0)
+    )
   
-  #matchups against particular opponents:
-  player_data_with_matchups = data %>% left_join(schedules_data %>% select(season, week, team, opponent) %>% distinct(), join_by('season', 'week', 'team')) %>%
-    arrange(gsis_id, season, week) %>%
-    group_by(gsis_id) %>%
-    mutate(average_passing_career = slide_dbl(.x = passing_yards, .f = mean, na.rm = TRUE, .before = Inf, .after = -1),
-           average_rushing_career = slide_dbl(.x = rushing_yards, .f = mean, na.rm = TRUE, .before = Inf, .after = -1),
-           average_receiving_career = slide_dbl(.x = receiving_yards, .f = mean, na.rm = TRUE, .before = Inf, .after = -1),
-           average_tds_career = slide_dbl(.x = tds, .f = mean, na.rm = TRUE, .before = Inf, .after = -1)) %>%
-    group_by(gsis_id, opponent) %>%
-    mutate(average_passing_against_opp = slide_dbl(.x = passing_yards, .f = mean, na.rm = TRUE, .before = Inf, .after = -1),
-           average_rushing_against_opp = slide_dbl(.x = rushing_yards,  .f = mean, na.rm = TRUE, .before = Inf, .after = -1),
-           average_receiving_against_opp = slide_dbl(.x = receiving_yards,  .f = mean, na.rm = TRUE, .before = Inf, .after = -1),
-           average_tds_against_opp= slide_dbl(.x = tds,  .f = mean, na.rm = TRUE, .before = Inf, .after = -1),
-           total_games_against_opp = slide_dbl(.x = passing_yards, .f = length, .before = Inf, .after = -1),
-           passing_matchup_average_against_opp = (average_passing_against_opp*total_games_against_opp +
-                                                    average_passing_career * 2)/(2+total_games_against_opp),
-           rushing_matchup_average_against_opp = (average_rushing_against_opp*total_games_against_opp +
-                                                    average_rushing_career * 2)/(2+total_games_against_opp),
-           receiving_matchup_average_against_opp = (average_receiving_against_opp*total_games_against_opp +
-                                                      average_receiving_career * 2)/(2+total_games_against_opp),
-           td_matchup_average_against_opp = (average_tds_against_opp*total_games_against_opp +
-                                               average_tds_career * 2)/(2+total_games_against_opp),
-           passing_weighted_matchup_ratio_against_opp = passing_matchup_average_against_opp/average_passing_career,
-           rushing_weighted_matchup_ratio_against_opp = rushing_matchup_average_against_opp/average_rushing_career,
-           receiving_weighted_matchup_ratio_against_opp = receiving_matchup_average_against_opp/average_receiving_career,
-           td_weighted_matchup_ratio_against_opp = td_matchup_average_against_opp/average_tds_career
-    ) %>% ungroup() %>% select(-average_passing_career, -average_rushing_career, -average_receiving_career, -average_tds_career,
-                 -average_passing_against_opp, -average_rushing_against_opp,-average_receiving_against_opp, -average_tds_against_opp,
-                 -passing_matchup_average_against_opp, -rushing_matchup_average_against_opp, -receiving_matchup_average_against_opp, -td_matchup_average_against_opp, -opponent)
-  
-  
-  data = player_data_with_matchups
-  
-  uninformative_stats_results = remove_uninformative_stats(df = data,
-                                                           column_list = setdiff(colnames(data), c(colnames(player_bios), colnames(time_spent_with_team), colnames(depth_charts), 'game_id')),
-                                                           missing_threshold = 0.98)
-  
-  columns_to_remove = uninformative_stats_results[[1]]
-  data = data %>% select(-any_of(columns_to_remove))
-  
-  cols_for_historical_calculations = setdiff(colnames(data), c(colnames(player_bios), colnames(time_spent_with_team), colnames(depth_charts), 'game_id',
-                                                               colnames(data)[str_detect(colnames(data), 'total_|games_played|matchup_ratio')]))
-  
-  column_categories[['identifiers']] = c(
-    'season', 'team', 'game_id', 'gsis_id', 'display_name'
-  )
-  
-  column_categories[['bio_data']] = setdiff(colnames(player_bios)[!str_detect(colnames(player_bios), '_id')], c(column_categories[['identifiers']], 'birth_date'))
-  
-  column_categories[['usage_and_depth']] = c(
-    'games_played', 'games_played_this_season',
-    setdiff(colnames(depth_charts), c(column_categories[['identifiers']], 'week')),
-    setdiff(colnames(time_spent_with_team), c(column_categories[['identifiers']], 'week'))
-  )
-  
-  
-  return(list(data, defensegl, column_categories, uninformative_stats_results, cols_for_historical_calculations))
-}
+  snaps_data = snaps_data %>% left_join(player_adv_stats, join_by('pfr_player_id', 'season', 'week', 'team'))
 
+  return(list(offense_data, snaps_data, defensegl))
+  
+}
 
 summarize_current_season_player_stats = function(data, defense_data, calc_metrics, column_categories, uninformative_stats_results, cols_for_historical_calculations)
 {
-  
   columns_0_1 = c(uninformative_stats_results[[2]], 'offense_pct')
   low_medians = uninformative_stats_results[[3]]
   
@@ -251,10 +226,15 @@ summarize_current_season_player_stats = function(data, defense_data, calc_metric
     data_with_historical_calculations = data_with_historical_calculations %>% mutate(!!cv_col_name := !!sym(sd_col)/!!sym(column_name))
   }
   
-  defense_with_historical_calculations = defense_data %>%
+  snaps_data_defense = load_snap_counts(seasons = min(data$season):max(data$season)) %>% select(season, week, team, pfr_player_id, defense_pct)
+  
+  defense_data = defense_data %>%
+    left_join(snaps_data_defense, join_by('season','week','team','pfr_id' == 'pfr_player_id'))
+  
+  defense_data_with_historical_calculations = defense_data %>%
     arrange(season, player_id, week) %>%
     group_by(season, player_id, pfr_id, position) %>%
-    group_modify(~ compute_slider_cumulatives(.x, setdiff(colnames(defense_data), c('player_id', 'pfr_id', 'position','season','week','team', colnames(defense_data)[str_detect(colnames(defense_data), 'total_')])), cumulative_only = FALSE)) %>%
+    group_modify(~ compute_slider_cumulatives(.x, setdiff(colnames(defense_data), c('player_id', 'gsis_id', 'pfr_id', 'position','season','week','team', colnames(defense_data)[str_detect(colnames(defense_data), 'total_')])), cumulative_only = FALSE)) %>%
     group_modify(~ compute_slider_cumulatives(.x, colnames(defense_data)[str_detect(colnames(defense_data), 'total_')], cumulative_only = TRUE))
   
   if(length(columns_0_1) > 0)
@@ -275,7 +255,7 @@ summarize_current_season_player_stats = function(data, defense_data, calc_metric
     select(!matches('cumulative_|sum_')) %>%
     select(!matches('team_drives|team_touchdowns|team_redzone'))
   
-  defense_with_historical_calculations_and_efficiency_metrics = calculate_efficiency_metrics(df = defense_with_historical_calculations,
+  defense_with_historical_calculations_and_efficiency_metrics = calculate_efficiency_metrics(df = defense_data_with_historical_calculations,
                                                                                              calc_metrics = list(fg_rate_this_season = c('cumulative_fg_made', 'cumulative_fg_att'),
                                                                                                                  pct_share_of_pressures = c('cumulative_def_pressure_score','cumulative_total_team_def_pressure_score'),
                                                                                                                  pct_share_of_tackles = c('cumulative_def_tackles_score', 'cumulative_total_team_def_tackles_score'),
@@ -286,14 +266,7 @@ summarize_current_season_player_stats = function(data, defense_data, calc_metric
   column_categories[['usage_and_depth']] = c(column_categories[['usage_and_depth']],
                                              colnames(data_with_historical_calculations_and_efficiency_metrics)[str_detect(colnames(data_with_historical_calculations_and_efficiency_metrics), 'offense_pct|also_played')])
   
-  # Opponent Matchup History (Calculated explicitly in your data pipeline)
-  column_categories[['matchup_history']] = c(
-    'total_games_against_opp',
-    'passing_weighted_matchup_ratio_against_opp',
-    'rushing_weighted_matchup_ratio_against_opp',
-    'receiving_weighted_matchup_ratio_against_opp',
-    'td_weighted_matchup_ratio_against_opp'
-  )
+
   
   #do one for stats and seasonal stats and ranking:
   
@@ -303,20 +276,21 @@ summarize_current_season_player_stats = function(data, defense_data, calc_metric
   present_stats_to_remove = setdiff(
     gsub('max_|min_|avg_|sd_|median_|pct_|_pct|_per_.*|average_|mean_|cv_|last3_|_lag[0-9]', '',
          colnames(data_with_historical_calculations_and_efficiency_metrics)[str_detect(colnames(data_with_historical_calculations_and_efficiency_metrics), 'max_|min_|avg_|sd_|median_|pct_|_pct|per_|differential|rating|average_|mean_|cv_|last3_|lag[0-9]|ratio|team_|total_')]),
-    c('passing_yards', 'rushing_yards', 'receiving_yards', 'anytime_td_scorer', 'receptions', 'games_played', 'games_played_this_season', 'total_games_against_opp',
-      colnames(data_with_historical_calculations_and_efficiency_metrics)[str_detect(colnames(data_with_historical_calculations_and_efficiency_metrics), 'weighted_matchup')],
-      names(calc_metrics))
+    c(colnames(data_with_historical_calculations_and_efficiency_metrics)[str_detect(colnames(data_with_historical_calculations_and_efficiency_metrics), "weighted_matchup")],
+      'passing_yards', 'rushing_yards', 'receiving_yards', 'anytime_td_scorer', 'receptions', 'games_played', 'games_played_this_season', 'total_games_against_opp', names(calc_metrics))
   )
   
   player_dat = data_with_historical_calculations_and_efficiency_metrics %>% select(-any_of(present_stats_to_remove))
   
   stats_fields = colnames(player_dat)[str_detect(colnames(player_dat), 'max_|min_|avg_|sd_|median_|pct_|_pct|per_|differential|rating|average_|mean_|cv_|last3_|lag[0-9]|ratio')]
   column_categories[['passing_current_season_stats']] = setdiff(stats_fields[str_detect(stats_fields, 'passing|passer|passes|completion|attempt|air_yards|aggressive|sack|hurried|blitz|pressure|_hit') &
-                                                                               !str_detect(stats_fields, 'rushing|receiving')], c('pct_share_of_intended_air_yards', 'last3_pct_share_of_intended_air_yards', stats_fields[str_detect(stats_fields, 'matchup')]))
-  column_categories[['rushing_current_season_stats']] = setdiff(stats_fields[str_detect(stats_fields, 'rushing|carries')], stats_fields[str_detect(stats_fields, 'matchup')])
-  column_categories[['receiving_current_season_stats']] = setdiff(c(setdiff(stats_fields[str_detect(stats_fields, 'receiving|reception|target|catchable|separation|opportunity_rating|share_of_intended')], c('average_depth_of_target_passer', 'last3_average_depth_of_target_passer')),
-                                                            'pct_share_of_intended_air_yards', 'last3_pct_share_of_intended_air_yards'), stats_fields[str_detect(stats_fields, 'matchup')])
-  column_categories[['other_current_season_stats']] = stats_fields[str_detect(stats_fields, 'td|penal') & !str_detect(stats_fields, 'passing|rushing|receiving')] 
+                                                                               !str_detect(stats_fields, 'rushing|receiving')],
+                                                                c('pct_share_of_intended_air_yards', 'last3_pct_share_of_intended_air_yards', column_categories$matchup_history))
+  column_categories[['rushing_current_season_stats']] = setdiff(stats_fields[str_detect(stats_fields, 'rushing|carries')], column_categories$matchup_history)
+  column_categories[['receiving_current_season_stats']] = c(setdiff(stats_fields[str_detect(stats_fields, 'receiving|reception|target|catchable|separation|opportunity_rating|share_of_intended')],
+                                                                    c('average_depth_of_target_passer', 'last3_average_depth_of_target_passer', column_categories$matchup_history)),
+                                                            'pct_share_of_intended_air_yards', 'last3_pct_share_of_intended_air_yards')
+  column_categories[['other_current_season_stats']] = setdiff(stats_fields[str_detect(stats_fields, 'td|penal') & !str_detect(stats_fields, 'passing|rushing|receiving')] , column_categories$matchup_history)
   
   #make sure nothing is in remaining or it won't be captured in the column categories:
   missing_cols = setdiff(colnames(player_dat),
@@ -336,22 +310,18 @@ summarize_current_season_player_stats = function(data, defense_data, calc_metric
             column_categories[['other_current_season_stats']]))
   if(length(missing_cols) > 0)
   {
-    print('Columnsnot accounted for in column categories:')
+    print('Columns not accounted for in column categories:')
     print(missing_cols)
   }
   
-  snaps_data = load_snap_counts(seasons = min(data$season):max(data$season)) %>%
-    select(season, week, pfr_player_id, defense_pct) 
-  
-  return(list(player_dat %>% select(-any_of(c("esb_id", "nfl_id", "pfr_id", "pff_id", "otc_id", "espn_id", "smart_id", 'team_abbr', 'posteam'))),
-               defense_with_historical_calculations_and_efficiency_metrics %>% left_join(snaps_data %>% select(pfr_player_id, season, week, defense_pct), join_by('season', 'week','pfr_id' == 'pfr_player_id')),
+  return(list(player_dat %>% select(-any_of(c("esb_id", "nfl_id", "pfr_id", "pff_id","otc_id", "espn_id", "smart_id","team_abbr", "posteam"))),
+              defense_with_historical_calculations_and_efficiency_metrics,
               column_categories))
   
 }
 
-calculate_player_seasonal_historical_stats = function(data, defense_data, column_categories, calc_metrics, cols_for_historical_calculations)
+calculate_player_seasonal_historical_stats = function(data, defense_data, schedules_data, column_categories, calc_metrics, cols_for_historical_calculations)
 {
-  
   player_seasonal_stats = data %>%
     group_by(gsis_id, season) %>%
     summarise(weeks_active = length(unique(week)),
@@ -389,7 +359,7 @@ calculate_player_seasonal_historical_stats = function(data, defense_data, column
   defense_seasonal_stats = defense_data %>%
     group_by(player_id, position, season) %>%
     summarise(weeks_active = length(unique(week)),
-              across(all_of(setdiff(colnames(defense_data), c('player_id','pfr_id','position','season','week','team'))),
+              across(all_of(setdiff(colnames(defense_data), c('player_id','pfr_id','gsis_id','pfr_player_id','position','season','week','team'))),
                      .fns = list(sum = ~sum(.x, na.rm = TRUE),
                                  mean = ~mean(.x, na.rm = TRUE),
                                  median = ~median(.x, na.rm = TRUE),
@@ -433,46 +403,309 @@ calculate_player_seasonal_historical_stats = function(data, defense_data, column
   ))
 }
 
+add_player_matchup_history <- function(data, schedules_data) {
+  data %>%
+    left_join(
+      schedules_data %>%
+        select(season, week, team, opponent) %>%
+        distinct(),
+      join_by("season", "week", "team")
+    ) %>%
+    arrange(gsis_id, season, week) %>%
+    group_by(gsis_id) %>%
+    mutate(
+      average_passing_career = slide_dbl(passing_yards, mean, na.rm = TRUE, .before = Inf, .after = -1),
+      average_rushing_career = slide_dbl(rushing_yards, mean, na.rm = TRUE, .before = Inf, .after = -1),
+      average_receiving_career = slide_dbl(receiving_yards, mean, na.rm = TRUE, .before = Inf, .after = -1),
+      average_tds_career = slide_dbl(tds, mean, na.rm = TRUE, .before = Inf, .after = -1)
+    ) %>%
+    group_by(gsis_id, opponent) %>%
+    mutate(
+      average_passing_against_opp = slide_dbl(passing_yards, mean, na.rm = TRUE, .before = Inf, .after = -1),
+      average_rushing_against_opp = slide_dbl(rushing_yards, mean, na.rm = TRUE, .before = Inf, .after = -1),
+      average_receiving_against_opp = slide_dbl(receiving_yards, mean, na.rm = TRUE, .before = Inf, .after = -1),
+      average_tds_against_opp = slide_dbl(tds, mean, na.rm = TRUE, .before = Inf, .after = -1),
+      total_games_against_opp = slide_dbl(passing_yards, length, .before = Inf, .after = -1),
+      
+      passing_matchup_average_against_opp =
+        (average_passing_against_opp * total_games_against_opp + average_passing_career * 2) /
+        (2 + total_games_against_opp),
+      
+      rushing_matchup_average_against_opp =
+        (average_rushing_against_opp * total_games_against_opp + average_rushing_career * 2) /
+        (2 + total_games_against_opp),
+      
+      receiving_matchup_average_against_opp =
+        (average_receiving_against_opp * total_games_against_opp + average_receiving_career * 2) /
+        (2 + total_games_against_opp),
+      
+      td_matchup_average_against_opp =
+        (average_tds_against_opp * total_games_against_opp + average_tds_career * 2) /
+        (2 + total_games_against_opp),
+      
+      passing_weighted_matchup_ratio_against_opp =
+        passing_matchup_average_against_opp / average_passing_career,
+      
+      rushing_weighted_matchup_ratio_against_opp =
+        rushing_matchup_average_against_opp / average_rushing_career,
+      
+      receiving_weighted_matchup_ratio_against_opp =
+        receiving_matchup_average_against_opp / average_receiving_career,
+      
+      td_weighted_matchup_ratio_against_opp =
+        td_matchup_average_against_opp / average_tds_career
+    ) %>%
+    ungroup() %>%
+    select(
+      -average_passing_career,
+      -average_rushing_career,
+      -average_receiving_career,
+      -average_tds_career,
+      -average_passing_against_opp,
+      -average_rushing_against_opp,
+      -average_receiving_against_opp,
+      -average_tds_against_opp,
+      -passing_matchup_average_against_opp,
+      -rushing_matchup_average_against_opp,
+      -receiving_matchup_average_against_opp,
+      -td_matchup_average_against_opp,
+      -opponent
+    )
+}
 
-pull_all_player_stats = function(min_year, max_year, team_redzone_drives, recalculate_seasonal = FALSE)
+
+pull_all_player_stats = function(min_year, max_year, team_redzone_drives, test_mode = FALSE, wk = NULL)
 {
-  player_data = get_player_data(min_year, max_year, schedules_data = schedules_raw, team_redzone_drives = team_redzone_drives)
-  offense_data = player_data[[1]]
-  defense_data = player_data[[2]]
+  #player bios, depth charts:
+  player_info = get_player_info(min_year, max_year)
+  player_bios = player_info[[3]]
+  time_spent_with_team = player_info[[4]]
+  depth_charts = player_info[[5]]
   
-  player_current_season_stats = summarize_current_season_player_stats(data = offense_data, defense_data = defense_data, calc_metrics = calc_metrics,
-                                                                      column_categories = player_data[[3]], uninformative_stats_results = player_data[[4]], cols_for_historical_calculations = player_data[[5]])
-  offense_current_season_stats = player_current_season_stats[[1]]
-  defense_current_season_stats = player_current_season_stats[[2]]
-
-  if(recalculate_seasonal == TRUE)
+  if (test_mode)
   {
-    player_historical_season_stats = calculate_player_seasonal_historical_stats(data = offense_data, defense_data = defense_data, column_categories = player_current_season_stats[[3]], calc_metrics = calc_metrics, cols_for_historical_calculations = player_data[[5]])
-    offense_historical_season_stats = player_historical_season_stats[[1]]
-    defense_historical_season_stats = player_historical_season_stats[[2]]
-    player_column_categories = player_historical_season_stats[[3]]
-    
-    for(name in c('passing_past_season_stats', 'rushing_past_season_stats', 'receiving_past_season_stats', 'other_past_season_stats', 'past_season_usage_and_depth'))
-    {
-      player_column_categories[[name]] = 
-        c(paste0('Last_Season_', player_column_categories[[name]]),
-          paste0('Two_Seasons_Ago_', player_column_categories[[name]]))
-    }
-  } else {
-    #offense_historical_season_stats = #read from supabase
-    #defense_historical_season_stats = #read from supabase
-    #column_categories_historical_seasons = #read from somewhere
+    time_spent_with_team = time_spent_with_team %>% filter(!(season == max_year & week > wk))
+    depth_charts = depth_charts %>% filter(!(season == max_year & week > wk))
   }
   
-  player_data_combined = offense_current_season_stats%>%
-    left_join(offense_historical_season_stats %>% mutate(season_to_match = season + 1)  %>% select(-season) %>% rename_with(~paste0('Last_Season_', .x), -any_of(c('gsis_id', 'season_to_match'))), join_by('gsis_id', 'season' == 'season_to_match')) %>%
-    left_join(offense_historical_season_stats %>% mutate(season_to_match = season + 2) %>% select(-season) %>% rename_with(~paste0('Two_Seasons_Ago_',.x), -any_of(c('gsis_id', 'season_to_match'))), join_by('gsis_id', 'season' == 'season_to_match'))
+  column_categories = player_info[[2]]
+  if (!is.null(wk)) {
+    existing_offense_stats = purrr::map_dfr(min_year:max_year, function(s) {
+      print(paste("Pulling season", s))
+      
+      get_supabase_data(
+        schema = "MainData",
+        table_name = "OffensePlayerStats",
+        additional_sql = list(season = paste0("eq.", s))
+      )
+    })
+    existing_defense_stats = purrr::map_dfr(min_year:max_year, function(s) {
+      print(paste("Pulling season", s))
+      
+      get_supabase_data(
+        schema = "MainData",
+        table_name = "DefensePlayerStats",
+        additional_sql = list(season = paste0("eq.", s))
+      )
+    })
+    
+    if (test_mode)
+    {
+      existing_offense_stats = existing_offense_stats %>% filter(!(season == max_year & week >= (wk-1)))
+      existing_defense_stats = existing_defense_stats %>% filter(!(season == max_year & week >= (wk-1)))
+    }
+  }
+  if (!is.null(wk) && wk > 1)
+  {
+    past_week_stats = get_player_raw_stats(max_year, max_year, schedules_data = schedules_raw, team_redzone_drives = team_redzone_drives)
+    
+    offense_data_past_week = past_week_stats[[1]] %>% filter(week == (wk - 1) & season == max_year)
+    defense_data_past_week = past_week_stats[[3]] %>% filter(week == (wk - 1) & season == max_year)
+    snaps_data_past_week = past_week_stats[[2]] %>% filter(week == (wk - 1) & season == max_year)
+    offense_and_snaps_data_past_week = player_bios %>%
+      select(gsis_id, pfr_id) %>%
+      distinct() %>%
+      inner_join(snaps_data_past_week, join_by("pfr_id" == "pfr_player_id")) %>%
+      filter(offense_pct > 0) %>%
+      left_join(
+        offense_data_past_week,
+        join_by("gsis_id", "season", "week", "team")
+      )
+    snaps_data = past_week_stats[[2]]
+    if (test_mode)
+    {
+      snaps_data = snaps_data %>% filter(!(season==max_year & week>wk))
+    }
+    
+    offense_data = existing_offense_stats %>%
+      filter(!(season == max_year & week == (wk - 1))) %>%
+      bind_rows(offense_and_snaps_data_past_week) %>%
+      filter(offense_pct > 0)
+    defense_data = existing_defense_stats %>%
+      filter(!(season == max_year & week == (wk - 1))) %>%
+      bind_rows(defense_data_past_week)
+    
+    if (test_mode)
+    {
+      offense_data = offense_data %>% filter(!(season == max_year & week >= wk))
+      defense_data = defense_data %>% filter(!(season == max_year & week >= wk))
+    }
+    
+    upcoming_week = depth_charts %>% filter(season == max_year & week == wk) %>% select(-depth_rank) %>% distinct() %>%
+      inner_join(load_players(file_type = 'csv') %>% filter(position_group %in% c('QB', 'RB', 'WR', 'TE'), last_season >= max_year) %>% select(gsis_id), join_by('gsis_id'))
+    upcoming_week_defense = depth_charts %>% filter(season == max_year & week == wk) %>% select(-depth_rank) %>% distinct() %>%
+      inner_join(load_players(file_type = 'csv') %>% filter(position %in% c('DE','DT','DL','LB','OLB','NT','MLB','ILB','CB','FS','S','SAF','DB'), last_season >= max_year) %>%
+                   select(gsis_id, pfr_id, position), join_by('gsis_id')) %>%
+      rename('player_id' = 'gsis_id')
+    
+    offense_data = offense_data %>% bind_rows(upcoming_week)
+    defense_data = defense_data %>% bind_rows(upcoming_week_defense)
+    
+  } else if (is.null(wk)) { # not mid-season
+    player_data = get_player_raw_stats(min_year, max_year, schedules_data = schedules_raw, team_redzone_drives = team_redzone_drives)
+    
+    playergl = player_data[[1]]
+    snaps_data = player_data[[2]]
+    defense_data = player_data[[3]]
+    
+    offense_data = player_bios %>% select(gsis_id, pfr_id) %>% distinct() %>%
+      inner_join(snaps_data, join_by("pfr_id" == "pfr_player_id")) %>%
+      filter(offense_pct > 0) %>%
+      left_join(playergl, join_by("gsis_id", "season", "week", "team"))
+    
+  } else {
+    upcoming_week = depth_charts %>%
+      filter(season == max_year & week == wk) %>%
+      select(-depth_rank) %>%
+      distinct() %>%
+      inner_join(player_bios %>% filter(position_group %in% c('QB', 'RB', 'WR', 'TE')) %>% select(gsis_id), join_by('gsis_id'))
+    
+    upcoming_week_defense = depth_charts %>%
+      filter(season == max_year & week == wk) %>%
+      select(-depth_rank) %>%
+      distinct() %>%
+      inner_join(load_players(file_type = 'csv') %>% filter(position %in% c('DE','DT','DL','LB','OLB','NT','MLB','ILB', 'CB','FS','S','SAF','DB')) %>% select(gsis_id, pfr_id, position), join_by('gsis_id')
+      ) %>%
+      rename(player_id = gsis_id)
+    
+    offense_data = existing_offense_stats %>% filter(offense_pct > 0) %>% bind_rows(upcoming_week)
+    
+    defense_data = existing_defense_stats %>% bind_rows(upcoming_week_defense)
+  }
+  
+  offense_data = offense_data %>% group_by(season, week, team) %>%
+    mutate(across(all_of(team_game_cols), ~ {if (all(is.na(.x))) .x else coalesce(.x, first(na.omit(.x)))})) %>%
+    ungroup() %>%
+    mutate(across(all_of(c("catchable_balls", "catchable_balls_caught", "redzone_targets","redzone_carries")),
+                  ~ replace(.x, season >= 2022 & offense_pct > 0 & is.na(.x), 0)
+    )) %>%
+    mutate(across(all_of(zero_if_played_cols), ~ replace(.x, !is.na(offense_pct) & offense_pct > 0 & is.na(.x), 0)))
+    
+  bio_cols_to_add = setdiff(colnames(player_bios), colnames(offense_data))
+  time_cols_to_add = setdiff(setdiff(colnames(time_spent_with_team), c("season", "week", "gsis_id", "team")),colnames(offense_data))
+  depth_cols_to_add = setdiff(setdiff(colnames(depth_charts), c("gsis_id", "team", "season", "week")),colnames(offense_data))
+  
+  offense_data = offense_data %>%
+    { if (length(bio_cols_to_add) > 0) left_join(., player_bios %>% select(gsis_id, all_of(bio_cols_to_add)), join_by("gsis_id")) else . } %>%
+    { if (length(time_cols_to_add) > 0) left_join(., time_spent_with_team %>% select(season, week, gsis_id, team, all_of(time_cols_to_add)), join_by("season", "week", "gsis_id", "team")) else . } %>%
+    { if (length(depth_cols_to_add) > 0) left_join(., depth_charts %>% select(gsis_id, team, season, week, all_of(depth_cols_to_add)), join_by("gsis_id", "team", "season", "week")) else . } %>%
+    mutate(tds = rushing_tds + receiving_tds + special_teams_tds, anytime_td_scorer = tds > 0) %>%
+    group_by(gsis_id) %>% arrange(season, week) %>%
+    mutate(games_played = row_number() - 1) %>% ungroup() %>%
+    group_by(gsis_id, season) %>% arrange(week) %>% mutate(games_played_this_season = row_number() - 1) %>% ungroup() %>%
+    add_player_matchup_history(schedules_raw)
+  
+  uninformative_stats_results = remove_uninformative_stats(df = offense_data,
+                                                           column_list = setdiff(colnames(offense_data), c(colnames(player_bios), colnames(time_spent_with_team), colnames(depth_charts),"game_id")),
+                                                           missing_threshold = 0.98)
+  columns_to_remove = uninformative_stats_results[[1]]
+  
+  offense_data = offense_data %>% select(-any_of(columns_to_remove))
+  
+  cols_for_historical_calculations = setdiff(
+    colnames(offense_data), c(colnames(player_bios),
+                              colnames(time_spent_with_team),
+                              colnames(depth_charts),
+                              'pfr_player_id',
+                              "game_id",
+                              colnames(offense_data)[str_detect(colnames(offense_data), "total_|games_played|matchup_ratio")]
+    ))
+
   
   
-  defense_data_combined = defense_current_season_stats %>%
+  # Opponent Matchup History (Calculated explicitly in your data pipeline)
+  column_categories[['matchup_history']] = c(
+    'total_games_against_opp',
+    'passing_weighted_matchup_ratio_against_opp',
+    'rushing_weighted_matchup_ratio_against_opp',
+    'receiving_weighted_matchup_ratio_against_opp',
+    'td_weighted_matchup_ratio_against_opp'
+  )
+  
+  if(!is.null(wk)) {
+    current_season_stats = summarize_current_season_player_stats(offense_data, defense_data, calc_metrics, column_categories, uninformative_stats_results, cols_for_historical_calculations = cols_for_historical_calculations)
+    offense_current_season_stats = current_season_stats[[1]]
+    defense_summarized_data = current_season_stats[[2]]
+    if (test_mode & !is.null(wk))
+    {
+      defense_summarized_data = defense_summarized_data %>% mutate(defense_pct = ifelse(season == max_year & week >= wk, NA, as.numeric(defense_pct)))
+    }
+    player_historical_season_stats = calculate_player_seasonal_historical_stats(data = offense_data %>% filter(season < max_year),
+                                                                                defense_data = defense_data %>%
+                                                                                  left_join(
+                                                                                    load_snap_counts(seasons = min_year:(max_year - 1)) %>% select(season, week, team, pfr_player_id, defense_pct),
+                                                                                    join_by('season', 'week', 'team', 'pfr_id' == 'pfr_player_id')) %>%
+                                                                                  filter(season < max_year),
+                                                                                schedules_data = schedules_raw,
+                                                                                column_categories = current_season_stats[[3]],
+                                                                                calc_metrics = calc_metrics,
+                                                                                cols_for_historical_calculations = cols_for_historical_calculations)
+  } else {
+    current_season_stats = summarize_current_season_player_stats(offense_data, defense_data, calc_metrics, column_categories, uninformative_stats_results, cols_for_historical_calculations = cols_for_historical_calculations)
+    offense_current_season_stats = current_season_stats[[1]]
+    defense_summarized_data = current_season_stats[[2]]
+    player_historical_season_stats = calculate_player_seasonal_historical_stats(data = offense_data, defense_data = defense_data, schedules_data = schedules_raw, column_categories = current_season_stats[[3]], calc_metrics = calc_metrics, cols_for_historical_calculations = cols_for_historical_calculations)
+  }
+  offense_historical_season_stats = player_historical_season_stats[[1]]
+  defense_historical_season_stats = player_historical_season_stats[[2]]
+  player_column_categories = player_historical_season_stats[[3]]
+  
+  for(name in c('passing_past_season_stats', 'rushing_past_season_stats', 'receiving_past_season_stats', 'other_past_season_stats', 'past_season_usage_and_depth'))
+  {
+    player_column_categories[[name]] = 
+      c(paste0('Last_Season_', player_column_categories[[name]]),
+        paste0('Two_Seasons_Ago_', player_column_categories[[name]]))
+  }
+  
+  
+  #combine the below logic together. but skip the raw stats other than the response variables and offense_pct (for training).
+  #should already be in there for the is.null(wk) case.
+  
+  data = player_info[[1]] %>%
+    group_by(gsis_id) %>% arrange(season, week) %>% mutate(games_played = (row_number()-1)) %>%
+    ungroup() %>%
+    group_by(gsis_id, season) %>% arrange(week) %>% mutate(games_played_this_season = (row_number() - 1))
+
+  player_data_combined = offense_current_season_stats %>%
+    left_join(
+      offense_historical_season_stats %>%
+        mutate(season_to_match = season + 1) %>%
+        select(-season) %>%
+        rename_with(~ paste0("Last_Season_", .x), -any_of(c("gsis_id", "season_to_match"))),
+      join_by("gsis_id", "season" == "season_to_match")
+    ) %>%
+    left_join(
+      offense_historical_season_stats %>%
+        mutate(season_to_match = season + 2) %>%
+        select(-season) %>%
+        rename_with(~ paste0("Two_Seasons_Ago_", .x), -any_of(c("gsis_id", "season_to_match"))),
+      join_by("gsis_id", "season" == "season_to_match")
+    )
+  
+  defense_data_combined = defense_summarized_data %>%
     left_join(defense_historical_season_stats %>% mutate(season_to_match = season + 1)  %>% select(-season) %>% rename_with(~paste0('Last_Season_', .x), -any_of(c('player_id', 'season_to_match'))), join_by('player_id', 'season' == 'season_to_match')) %>%
-    left_join(defense_historical_season_stats %>% mutate(season_to_match = season + 2) %>% select(-season) %>% rename_with(~paste0('Two_Seasons_Ago_',.x), -any_of(c('player_id', 'season_to_match'))), join_by('player_id', 'season' == 'season_to_match')) %>%
-    rename('gsis_id' = 'player_id')
+    left_join(defense_historical_season_stats %>% mutate(season_to_match = season + 2) %>% select(-season) %>% rename_with(~paste0('Two_Seasons_Ago_',.x), -any_of(c('player_id', 'season_to_match'))), join_by('player_id', 'season' == 'season_to_match'))
   
   return(list(player_data_combined, defense_data_combined, player_column_categories))
 }
+

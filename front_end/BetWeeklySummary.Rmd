@@ -55,10 +55,17 @@ schedule_table_node = schedule_html %>% html_node('table#games')
 if (!inherits(schedule_table_node, "xml_missing"))
 {
   schedule_table = schedule_table_node %>% html_table(fill = TRUE)
+  schedule_table$Week = case_when(
+        schedule_table$Week == 'WildCard' ~ 19,
+        schedule_table$Week == 'Division' ~ 20,
+        schedule_table$Week == 'ConfChamp' ~ 21,
+        schedule_table$Week == 'SuperBowl' ~ 22,
+        .default = as.numeric(schedule_table$Week)
+      )
 } else {
    schedule_table = NULL
 }
-games= schedule_table[schedule_table$Week == unique(placed_bets$Week),c(1,2,3,4,5,7)]  %>%
+games= schedule_table[which(schedule_table$Week == unique(placed_bets$Week)),c(1,2,3,4,5,7)]  %>%
   mutate(Time = format(strptime(Time, "%I:%M%p"), "%H:%M"),
          posix_timestamp_game = as.POSIXct(paste(Date, Time), tz = "America/New_York")) %>%
   mutate(time_parsed = parse_date_time(Time, orders = c("I:Mp","I:M p","H:M")),

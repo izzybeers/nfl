@@ -14,99 +14,187 @@ library(quadprog)
 library(stringr)
 library(Matrix)
 library(tidyr)
-gs4_auth(cache = ".secrets", email = "izzyb961@gmail.com")
+# gs4_auth(cache = ".secrets", email = "izzyb961@gmail.com")
 
+readRenviron(".Renviron")
+SUPABASE_URL = Sys.getenv('SUPABASE_URL')
+SUPABASE_KEY = Sys.getenv('SUPABASE_KEY')
 
-sheet_id = '19sWOOPFI37WaR5lmlYS6UUrV-0dmTn0iTFqUp26sfGI'
-link_prefix =  'https://docs.google.com/spreadsheets/d/e/2PACX-1vTyIaWWovW2YUP1-JxYpg9ZHpF7a2i_7AEVan5ptaBBiwj6gwYp0STpE8HvYILR190HTrOFt2GMyUqn/pub?gid='
-link_suffix = "&single=true&output=csv"
-passing_gid = '0'
-rushing_gid = '1041188467'
-receiving_gid = '1971939369'
-touchdown_gid = '1979813660'
-gid_bets_placed = '95780958'
-gid_bet_results = '1472501972'
-team_lookup_table = read.csv('https://docs.google.com/spreadsheets/d/1DSSz4X-3LLAarRlBRtuMsGJ1hh2FDdVeHJZFdpZGW0A/export?format=csv&gid=0')
+bet_types = c('Receiving', 'Receptions', 'Rushing', 'RushRec', 'Touchdown', 'Passing', 'Moneyline', 'SpreadAlternate')
 
-min_return_portfolio_optimization = 0.5
-correlations = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vT9_LcNO2d8L5kzbJQZZti9kxfAZRFRAl2oJz5WlpusfvL1txbkc8OU6BSlB54TA9HCBHRlIxi9MpuT/pub?gid=956130726&single=true&output=csv')
-depth_charts = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vTyIaWWovW2YUP1-JxYpg9ZHpF7a2i_7AEVan5ptaBBiwj6gwYp0STpE8HvYILR190HTrOFt2GMyUqn/pub?gid=594515538&single=true&output=csv') %>%
-  group_by(player_id) %>% arrange(desc(updated)) %>% slice(1) %>% ungroup()
-
-
-extra_passing_info = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vTyIaWWovW2YUP1-JxYpg9ZHpF7a2i_7AEVan5ptaBBiwj6gwYp0STpE8HvYILR190HTrOFt2GMyUqn/pub?gid=1528317693&single=true&output=csv')
-extra_rushing_info = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vTyIaWWovW2YUP1-JxYpg9ZHpF7a2i_7AEVan5ptaBBiwj6gwYp0STpE8HvYILR190HTrOFt2GMyUqn/pub?gid=1396923583&single=true&output=csv')
-extra_receiving_info = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vTyIaWWovW2YUP1-JxYpg9ZHpF7a2i_7AEVan5ptaBBiwj6gwYp0STpE8HvYILR190HTrOFt2GMyUqn/pub?gid=942194055&single=true&output=csv')
-extra_touchdown_info = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vTyIaWWovW2YUP1-JxYpg9ZHpF7a2i_7AEVan5ptaBBiwj6gwYp0STpE8HvYILR190HTrOFt2GMyUqn/pub?gid=864263040&single=true&output=csv')
-
-
-#need this if the app.R file can't access global.R in a different directory:
-passing_numbers = seq(150,360,30)
-rushing_numbers = c(25,seq(40,140,20))
-receiving_numbers = c(25,seq(40,140,20))
-
-passing_response = c()
-for(n in passing_numbers)
+get_supabase_data <- function(schema, table_name, additional_sql = list(), select = "*")
 {
-  passing_response = c(passing_response, paste0('Passing_Yds_', n))
-}
-rushing_response = c()
-for(n in rushing_numbers)
-{
-  rushing_response = c(rushing_response, paste0('Rushing_Yds_', n))
-}
-receiving_response = c()
-for(n in rushing_numbers)
-{
-  receiving_response = c(receiving_response, paste0('Receiving_Yds_', n))
-}
-touchdown_response = 'Anytime_Touchdown'
-
-
-pull_prediction_data = function(index, gids, responses)
-{
-  gid = gids[index]
-  response_list = responses[[index]]
-  td = any(response_list == 'Anytime_Touchdown')
-  link =  paste0(link_prefix, gid, link_suffix)
-  res = read.csv(link)
-  if(nrow(res) > 0)
-  {
-    if(td == TRUE)
-    {
-      res$label = 'Anytime TD Scorer'
-    } else {
-      res$label = paste0(str_extract(res$Response, '[0-9]+'), '+')
-    }
+  url <- paste0(SUPABASE_URL, "/rest/v1/", table_name)
+  
+  response <- GET(
+    url,
+    query = c(
+      list(select = select),
+      additional_sql
+    ),
+    add_headers(
+      "apikey" = SUPABASE_KEY,
+      "Authorization" = paste("Bearer", SUPABASE_KEY),
+      "Accept-Profile" = schema
+    )
+  )
+  
+  if (http_error(response)) {
+    stop(content(response, "text", encoding = "UTF-8"))
   }
   
-  #get most recent update:
-  res = res %>% filter(Response %in% response_list) %>%
-    group_by(Season, Week, Response, player_id)  %>%
-    mutate(updateTime = as.POSIXct(
-      as.character(updateTime),
-      format = "%Y-%m-%d %I:%M %p",
-      tz = "America/New_York"
-    )) %>%
-    slice_max(order_by = updateTime, n = 1, with_ties = FALSE, na_rm = TRUE) %>%
-    ungroup()
-  return(res)
+  fromJSON(content(response, "text", encoding = "UTF-8"))
+}
+
+
+write_to_supabase = function(schema, table_name, df, batch_size = 500)
+{
+  url = paste0(SUPABASE_URL, "/rest/v1/", table_name)
+  
+  for (start_row in seq(1, nrow(df), by = batch_size))
+  {
+    end_row = min(start_row + batch_size - 1, nrow(df))
+    
+    batch = df[start_row:end_row, ]
+    
+    body_data = toJSON(
+      batch,
+      dataframe = "rows",
+      auto_unbox = TRUE,
+      na = "null",
+      null = "null",
+      digits = NA
+    )
+    
+    response = POST(
+      url,
+      add_headers(
+        "apikey" = SUPABASE_KEY,
+        "Authorization" = paste("Bearer", SUPABASE_KEY),
+        "Content-Type" = "application/json",
+        "Content-Profile" = schema,
+        "Prefer" = "return=minimal"
+      ),
+      body = body_data
+    )
+    
+    if (http_error(response))
+    {
+      stop(
+        paste(
+          "Failed on rows", start_row, "to", end_row, ":",
+          content(response, "text", encoding = "UTF-8")
+        )
+      )
+    }
+    
+    print(paste("Wrote rows", start_row, "to", end_row))
+  }
+  
+  print(paste("Successfully wrote", nrow(df), "rows to", table_name))
+  return(TRUE)
+}
+
+
+# sheet_id = '19sWOOPFI37WaR5lmlYS6UUrV-0dmTn0iTFqUp26sfGI'
+# link_prefix =  'https://docs.google.com/spreadsheets/d/e/2PACX-1vTyIaWWovW2YUP1-JxYpg9ZHpF7a2i_7AEVan5ptaBBiwj6gwYp0STpE8HvYILR190HTrOFt2GMyUqn/pub?gid='
+# link_suffix = "&single=true&output=csv"
+# passing_gid = '0'
+# rushing_gid = '1041188467'
+# receiving_gid = '1971939369'
+# touchdown_gid = '1979813660'
+# gid_bets_placed = '95780958'
+# gid_bet_results = '1472501972'
+
+team_lookup_table = get_supabase_data('MainData', 'TeamLookup')
+
+# correlations = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vT9_LcNO2d8L5kzbJQZZti9kxfAZRFRAl2oJz5WlpusfvL1txbkc8OU6BSlB54TA9HCBHRlIxi9MpuT/pub?gid=956130726&single=true&output=csv')
+# depth_charts = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vTyIaWWovW2YUP1-JxYpg9ZHpF7a2i_7AEVan5ptaBBiwj6gwYp0STpE8HvYILR190HTrOFt2GMyUqn/pub?gid=594515538&single=true&output=csv') %>%
+#   group_by(player_id) %>% arrange(desc(updated)) %>% slice(1) %>% ungroup()
+
+
+# extra_passing_info = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vTyIaWWovW2YUP1-JxYpg9ZHpF7a2i_7AEVan5ptaBBiwj6gwYp0STpE8HvYILR190HTrOFt2GMyUqn/pub?gid=1528317693&single=true&output=csv')
+# extra_rushing_info = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vTyIaWWovW2YUP1-JxYpg9ZHpF7a2i_7AEVan5ptaBBiwj6gwYp0STpE8HvYILR190HTrOFt2GMyUqn/pub?gid=1396923583&single=true&output=csv')
+# extra_receiving_info = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vTyIaWWovW2YUP1-JxYpg9ZHpF7a2i_7AEVan5ptaBBiwj6gwYp0STpE8HvYILR190HTrOFt2GMyUqn/pub?gid=942194055&single=true&output=csv')
+# extra_touchdown_info = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vTyIaWWovW2YUP1-JxYpg9ZHpF7a2i_7AEVan5ptaBBiwj6gwYp0STpE8HvYILR190HTrOFt2GMyUqn/pub?gid=864263040&single=true&output=csv')
+#need this if the app.R file can't access global.R in a different directory:
+# passing_numbers = seq(150,360,30)
+# rushing_numbers = c(25,seq(40,140,20))
+# receiving_numbers = c(25,seq(40,140,20))
+# 
+# passing_response = c()
+# for(n in passing_numbers)
+# {
+#   passing_response = c(passing_response, paste0('Passing_Yds_', n))
+# }
+# rushing_response = c()
+# for(n in rushing_numbers)
+# {
+#   rushing_response = c(rushing_response, paste0('Rushing_Yds_', n))
+# }
+# receiving_response = c()
+# for(n in rushing_numbers)
+# {
+#   receiving_response = c(receiving_response, paste0('Receiving_Yds_', n))
+# }
+# touchdown_response = 'Anytime_Touchdown'
+# 
+# 
+pull_prediction_data = function()
+{
+  player_info = get_supabase_data('predictions', 'PlayerPredictions') %>%
+    group_by(response_var, season, Week, gsis_id) %>%
+    arrange(updated_at, descending = TRUE) %>% 
+    slice(1) %>% ungroup()
+  
+  team_info = get_supabase_data('predictions', 'TeamPredictions') %>%
+    group_by(response_var, season, Week, team) %>%
+    arrange(updated_at, descending = TRUE) %>% 
+    slice(1) %>% ungroup()
+  
+  predictions = player_info %>% rename('BettingOn' = 'gsis_id') %>%
+    select(response_var, season, Week, BettingOn, Model_Probability, team, opponent_team, gmeday, time_of_day) %>%
+    bind_rows(team_info %>% rename('BettingOn' = 'team') %>%
+                select(response_var, season, Week, BettingOn, Model_Probability, team, opponent_team, gameday, time_of_day)) %>%
+    mutate(Timeslot = paste(gameday, time_of_day),
+           Type = ifelse(response_var %in% c('anytime_td_scorer', 'team_win'), response_var, strsplit(response_var, '_')[1])
+  
+  return(list(player_info, team_info, predictions))
 }
 
 
 
-get_props <- function(bet_category) {
+get_props = function(bet_category) {
   bet_id = case_when(
-    bet_category == 'Receiving' ~ '16570',
-    bet_category == 'Rushing' ~ '16571',
-    bet_category == 'Touchdown' ~ '12438',
-    bet_category == 'Passing' ~ '16569'
+    bet_category == 'receiving' ~ '16570',
+    bet_category == 'receptions' ~ '16821',
+    bet_category == 'rushing' ~ '16571',
+    bet_category == 'rushing_receiving' ~ '16572',
+    bet_category == 'anytime_td_scorer' ~ '12438',
+    bet_category == 'passing' ~ '16569',
+    bet_category == 'team_win' ~ '4518',
+    bet_category == 'team_diff' ~ '13195'
   )
   base_url = paste0("https://sportsbook-nash.draftkings.com/sites/US-NJ-SB/api/sportscontent/controldata/league/leagueSubcategory/v1/markets?isBatchable=false&templateVars=%2C",bet_id,"&eventsQuery=%24filter%3DleagueId%20eq%20%2788808%27%20AND%20clientMetadata%2FSubcategories%2Fany%28s%3A%20s%2FId%20eq%20%27", bet_id, "%27%29&marketsQuery=%24filter%3DclientMetadata%2FsubCategoryId%20eq%20%27",bet_id,"%27%20AND%20tags%2Fall%28t%3A%20t%20ne%20%27SportcastBetBuilder%27%29&include=Events&entity=events")
+  
   lines = tryCatch({
-    fromJSON(content(GET(base_url), as = "text", encoding = "UTF-8"), flatten = TRUE)$selections %>% select(marketId, label, `displayOdds.american`) %>%
-    left_join(fromJSON(content(GET(base_url), as = "text", encoding = "UTF-8"))$markets %>% select(id,name), join_by(marketId == id)) %>%
+    response = GET(
+      base_url, user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"),
+      add_headers(
+        "Accept" = "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "Accept-Language" = "en-US,en;q=0.9",
+        "Cache-Control" = "no-cache",
+        "Pragma" = "no-cache",
+        "Upgrade-Insecure-Requests" = "1"
+        )
+      )
+    data = fromJSON(content(response, as = "text", encoding = "UTF-8"), flatten = TRUE)
+    if (length(data$selections) > 0)
+    {
+      data$selections %>% select(marketId, label, `displayOdds.american`, points) %>%
+    left_join(data$markets %>% select(id,name), join_by(marketId == id)) %>%
     rename('Odds' = `displayOdds.american`)
+    }
   }, error = function(e) {
     print(e$message)
     return(NULL)
@@ -114,13 +202,16 @@ get_props <- function(bet_category) {
   if(!is.null(lines))
   {
     lines$Odds <- gsub("\u2212", "-", lines$Odds)
-    if(bet_category == 'Touchdown')
+    if(bet_category == 'anytime_td_scorer')
     {
-      lines = lines %>% filter(name == 'Anytime TD Scorer') %>% rename('Type' = 'name', 'name' = 'label') %>% mutate(label = 'Anytime TD Scorer')
-      lines = lines %>% mutate(name = gsub(paste(bet_category, ifelse(bet_category == 'Touchdown', 'Anytime TD Scorer', 'Yards')), '', name) %>% trimws())
+      lines = lines %>% filter(name == 'Anytime TD Scorer') %>% rename('Type' = 'name', 'name' = 'label') %>% mutate(label = '')
+    } else if (bet_category == 'team_win') {
+      lines = lines %>% filter(name == 'Moneyline') %>% rename('Type' = 'name', 'name' = 'label') %>% select(-points) %>%
+        mutate(label = '')
+    } else if (bet_category == 'team_diff') {
+      line = lines %>% mutate(Type = 'Spread Alternate') %>% rename('Type' = 'name', 'name' = 'label', 'label' = 'points')
     } else {
       lines = lines %>% mutate(Type = bet_category)
-      lines = lines %>% mutate(name = gsub(paste(bet_category, 'Yards'), '', name) %>% trimws())
     }
     
     lines = lines %>% mutate(profit_per_100 = ifelse(as.numeric(Odds) < 0, (100*100/abs(as.numeric(Odds))), as.numeric(Odds)))
@@ -136,233 +227,231 @@ clean_names = function(name)
   return(tolower(name) %>% str_remove_all("[[:punct:]]+") %>% str_remove("\\b(jr|sr|i{1,3}|iv|v|vi{1,3}|ix|x|xi{1,3})\\b") %>% str_squish() %>% trimws())
 }
 
-join_preds_and_props = function(preds, props)
+join_preds_and_props = function(player_preds, team_preds, props)
 {
-  preds$Type = ifelse(preds$Response == 'Anytime_Touchdown', 'Anytime TD Scorer', sapply(strsplit(preds$Response, '_'), function(x) x[1]))
+  preds$type = ifelse(preds$response_var == 'anytime_td_scorer', 'anytime TD scorer', sapply(strsplit(preds$response_var, '_'), function(x) x[1]))
   joined = preds %>% mutate(cleaned_names = clean_names(names)) %>% left_join(props %>% mutate(cleaned_name = clean_names(name)), join_by('cleaned_names' == 'cleaned_name', 'label' == 'label', 'Type' == 'Type')) %>% filter(!is.na(marketId)) %>%
     mutate(Betting_Line_Implied_Prob = ifelse(as.numeric(Odds) < 0, (-1)*as.numeric(Odds) / ((-1)*as.numeric(Odds) + 100), 100 / (as.numeric(Odds) + 100)),
-           Timeslot = paste(Day, Time_of_Day)) %>%
+           Timeslot = paste(gameday, time_of_day)) %>%
     rename('Player' = 'names') %>%
-    mutate(posix_timestamp = as.POSIXct(paste0(Date, ", ",
-                                               ifelse(str_extract(Date,'[A-Za-z]+') %in% c('January', 'February'), Season + 1, Season),
-                                               " ", Time),format = "%B %d, %Y %I:%M %p",tz = "America/New_York")) %>%
+    mutate(posix_timestamp = as.POSIXct(paste0(gameday, " ", Time, ':--'),format = "%B %d, %Y %I:%M %p",tz = "America/New_York")) %>%
     filter(posix_timestamp > Sys.time() - 3600) %>%
-    select(Player, Position, Starting, Type, label, Team, Opp, Date, Time, posix_timestamp, Timeslot, Odds, Model_Probability, Betting_Line_Implied_Prob, Expected_Accuracy, profit_per_100)
+    select(display_name, position, type, label, team, opponent_team, gameday, time_of_day, posix_timestamp, Odds, Model_Probability, Betting_Line_Implied_Prob, profit_per_100)
   return(joined)
 }
 
 
-display_extra_info = function(df, bet_type, player_name, week, season)
-{
-  print(week)
-  print(season)
-  print(extra_rushing_info)
-  print(bet_type)
-  print(player_name)
-  if(bet_type == 'Passing')
-  {
-    print('entered passing')
-    extra_info = df %>% filter(Name == player_name)
-    extra_info_min_year = paste0('In NFL since: ', extra_info$min_year)
-    extra_info_draft = ifelse(!is.na(extra_info$draft_round),
-                              paste0('Drafted Round ', extra_info$draft_round, ' (Pick ', extra_info$draft_pick, ') to team ', team_lookup_table$FullName[team_lookup_table$Team == extra_info$original_draft_team]),
-                              'Undrafted, or no draft info available')
-    extra_info_home = ifelse(extra_info$International == 1, 'International Game',
-                             ifelse(extra_info$Home == 1, 'Home Game', 'Away Game'))
-    extra_info_depth = paste('Depth:', extra_info$Depth)
-    if(week > 1)
-    {
-      if(!is.na(extra_info$Pct_Active) && extra_info$Pct_Active > 0)
-      {
-        extra_info_pct_active_gs = paste0('This season, Active for ', round(100*extra_info$Pct_Active),'% of games, and Starter for ', round(100*extra_info$Pct_GS), '% of games')
-        opp_defense_passyd  = round(extra_info$Opp_Avg_Defense_PassY_Allowed)
-        opp_defense_passyd_score = ifelse(opp_defense_passyd <= 130, 'Very Good Pass Defense',
-                                          ifelse(opp_defense_passyd <= 202, 'Pretty Good Pass Defense',
-                                                 ifelse(opp_defense_passyd <= 241, 'Okay Pass Defense',
-                                                        ifelse(opp_defense_passyd <= 320, 'Not Good Pass Defense',
-                                                               'Terrible Pass Defense'))))
-        extra_info_stats_this_season = paste0('Is the team\'s QB1: ', ifelse(extra_info$Is_Qb1 == 1, 'Yes', 'No'), '<br>',
-                                              'Passing Yds Previous Game: ', extra_info$Passing_Yds_Lag1, '<br>',
-                                              'This Season, Average Passing Yds Per Game: ', round(extra_info$Avg_Passing_Yds), '<br>',
-                                              'This Season, Average Passing Attempts Per Game: ', round(extra_info$Avg_Passing_Att, 1), '<br>',
-                                              'This Season, Average Passing 1st Downs Per Game: ', round(extra_info$Avg_Passing_1D, 1), '<br>',
-                                              'This Season, Average Passing Completions Per Game: ', round(extra_info$Avg_Passing_Cmp,1), '<br>',
-                                              'This Season, Average Passing TD Per Game: ', round(extra_info$Avg_Passing_TD,1), '<br>',
-                                              'This Season, Opponent\'s Average Passing Yards Allowed Per Game: ', opp_defense_passyd, ' (', opp_defense_passyd_score,')', '<br>')
-      } else {
-        extra_info_stats_this_season = 'Player had no active games this season, so no current stats to show.'
-      }
-    } else {
-      extra_info_stats_this_season = 'Since it is only week 1, there are no current season stats to show.'
-    }
-    if(extra_info$min_year < season) {
-      if(!is.na(extra_info$Last_Season_Pct_Active) && extra_info$Last_Season_Pct_Active > 0)
-      {
-        extra_info_stats_last_season = paste0('Last Season, Percent of Games Active: ', round(100*extra_info$Last_Season_Pct_Active), '%<br>',
-                                              'Last Season, Median Passing Yds Per Game: ', round(extra_info$Last_Season_Passing_Yds_median), '<br>',
-                                              'Last Season, Passing Completion Percent: ', round(100*extra_info$Last_Season_Passing_Comp_Pct), '%<br>',
-                                              'Last Season, Average Passing TD Per Game: ', round(extra_info$Last_Season_Passing_TD_mean,1), '<br>')
-      } else {
-        extra_info_stats_last_season = 'Player had no active games last season, or last season stats unavailable.'
-      }
-    } else {
-      extra_info_stats_last_season = 'This is the player\'s first season in the NFL, so no previous season stats to show.'
-    }
-    
-  } else if(bet_type == 'Rushing')
-  {
-    print('entered rushing')
-    extra_info = df %>% filter(Name == player_name)
-    print(extra_info)
-    extra_info_min_year = paste0('In NFL since: ', extra_info$min_year)
-    extra_info_draft = ifelse(!is.na(extra_info$draft_round),
-                              paste0('Drafted Round ', extra_info$draft_round, ' (Pick ', extra_info$draft_pick, ') to team ', team_lookup_table$FullName[team_lookup_table$Team == extra_info$original_draft_team]),
-                              'Undrafted, or no draft info available')
-    extra_info_home = ifelse(extra_info$International == 1, 'International Game',
-                             ifelse(extra_info$Home == 1, 'Home Game', 'Away Game'))
-    extra_info_depth = paste('Depth:', extra_info$Depth)
-    if(week > 1)
-    {
-      extra_info_pct_active_gs = paste0('This season, Active for ', round(100*extra_info$Pct_Active),'% of games, and Starter for ', round(100*extra_info$Pct_GS), '% of games')
-      opp_defense_rushyd  = round(extra_info$Opp_Avg_Defense_RushY_Allowed)
-      opp_defense_rushyd_score = ifelse(opp_defense_rushyd <= 58, 'Very Good Rush Defense',
-                                        ifelse(opp_defense_rushyd <= 99, 'Pretty Good Rush Defense',
-                                               ifelse(opp_defense_rushyd <= 124, 'Okay Rush Defense',
-                                                      ifelse(opp_defense_rushyd <= 185, 'Not Good Rush Defense',
-                                                             'Terrible Rush Defense'))))
-      if(!is.na(extra_info$Pct_Active) && extra_info$Pct_Active > 0)
-      {
-        extra_info_stats_this_season = paste0('This Season, Average Rushing Yds Per Game: ',  round(extra_info$Avg_Rushing_Yds,1),'<br>',
-                                              'This Season, Average Rushing Attempts Per Game: ', round(extra_info$Avg_Rushing_Att,1),'<br>',
-                                              'This Season, Average Rushing 1st Downs Per Game: ', round(extra_info$Avg_Rushing_1D, 1), '<br>',
-                                              'Rushing Yds Previous Game: ', extra_info$Rushing_Yds_Lag1, '<br>',
-                                              'This Season, Opponent\'s Defense Avg Rush Yards Allowed Per Game: ', opp_defense_rushyd, ' (', opp_defense_rushyd_score, ')')
-      } else {
-        extra_info_stats_this_season = 'Player had no active games this year, so there are no current season stats to show.'
-      }
-    } else {
-      extra_info_stats_this_season = 'Since it is only week 1, there are no current season stats to show.'
-    }
-    if(extra_info$min_year < season) {
-      if(!is.na(extra_info$Last_Season_Pct_Active) && extra_info$Last_Season_Pct_Active > 0)
-      {
-        extra_info_stats_last_season = paste0('Last Season, Percent of Games Active: ', round(100*extra_info$Last_Season_Pct_Active), '%<br>',
-                                              'Last Season, Average Rushing Yds Per Game: ', round(extra_info$Last_Season_Rushing_Yds_mean, 1), '<br>',
-                                              'Last Season, Highest Rushing Yds in a Game: ', round(extra_info$Last_Season_Rushing_Yds_max), '<br>',
-                                              'Last Season, Average Rushing TD Per Game: ', round(extra_info$Last_Season_Rushing_TD_mean,1), '<br>',
-                                              'Last Season, Average Rushing Attempts Per Game: ', round(extra_info$Last_Season_Rushing_Att_mean,1), '<br>')
-        
-      } else {
-        extra_info_stats_last_season = 'Player had no active games last year, so no previous season stats to show.'
-      }
-    } else {
-      extra_info_stats_last_season = 'This is the player\'s first season in the NFL, so no previous season stats to show.'
-    }
-    
-    print(extra_info_min_year)
-    print(extra_info_draft)
-    print(extra_info_home)
-    print(extra_info_stats_this_season)
-    print(extra_info_stats_last_season)
-  } else if(bet_type == 'Receiving')
-  {
-    print('entered receiving')
-    extra_info = df  %>% filter(Name == player_name)
-    extra_info_min_year = paste0('In NFL since: ', extra_info$min_year)
-    extra_info_draft = ifelse(!is.na(extra_info$draft_round),
-                              paste0('Drafted Round ', extra_info$draft_round, ' (Pick ', extra_info$draft_pick, ') to team ', team_lookup_table$FullName[team_lookup_table$Team == extra_info$original_draft_team]),
-                              'Undrafted, or no draft info available')
-    extra_info_home = ifelse(extra_info$International == 1, 'International Game',
-                             ifelse(extra_info$Home == 1, 'Home Game', 'Away Game'))
-    extra_info_depth = paste('Depth:', extra_info$Depth)
-    if(week > 1)
-    {
-      extra_info_pct_active_gs = paste0('This season, Active for ', round(100*extra_info$Pct_Active),'% of games, and Starter for ', round(100*extra_info$Pct_GS), '% of games')
-      if(!is.na(extra_info$Pct_Active) && extra_info$Pct_Active > 0)
-      {
-        extra_info_stats_this_season = paste0('This Season, Average Receiving Yds Per Game: ',  round(extra_info$Avg_Receiving_Yds,1), '<br>',
-                                              'This Season, Average Targets Per Game: ',  round(extra_info$Avg_Receiving_Tgt,1), '<br>',
-                                              'This Season, Average Receiving 1st Downs Per Game: ', round(extra_info$Avg_Receiving_1D, 1), '<br>',
-                                              'This Season, Average Receptions Per Game: ', round(extra_info$Avg_Receiving_Rec,1))
-      } else {
-        extra_info_stats_this_season = 'Player had no active games this year, so there are no current season stats to show.'
-      }
-    } else {
-      extra_info_stats_this_season = 'Since it is only week 1, there are no current season stats to show.'
-    }
-    if(extra_info$min_year < season) {
-      if(!is.na(extra_info$Last_Season_Pct_Active) && extra_info$Last_Season_Pct_Active > 0)
-      {
-        extra_info_stats_last_season = paste0('Last Season, Percent of Games Active: ', round(100*extra_info$Last_Season_Pct_Active), '%<br>',
-                                              'Last Season, Average Receiving Yds Per Game: ', round(extra_info$Last_Season_Receiving_Yds_mean, 1), '<br>',
-                                              'Last Season, Average Targets Per Game: ', round(extra_info$Last_Season_Receiving_Tgt_mean, 1), '<br>',
-                                              'Last Season, Average Receiving 1st Downs Per Game: ', round(extra_info$Last_Season_Receiving_1D_mean, 2), '%<br>',
-                                              'Last Season, Average Receiving Yards Before Catch Per Game: ', round(extra_info$Last_Season_Receiving_YBC_mean,1), '<br>',
-                                              'Last Season, Highest Receiving Yards Before Catch Per Game: ', round(extra_info$Last_Season_Receiving_YBC_max), '<br>')
-        
-      } else {
-        extra_info_stats_last_season = 'Player had no active games last year, so no previous season stats to show.'
-      }
-    } else {
-      extra_info_stats_last_season = 'This is the player\'s first season in the NFL, so no previous season stats to show.'
-    }
-  } else {
-    print('entered touchdown')
-    extra_info = df %>% filter(Name == player_name)
-    extra_info_min_year = paste0('In NFL since: ', extra_info$min_year)
-    extra_info_draft = ifelse(!is.na(extra_info$draft_round),
-                              paste0('Drafted Round ', extra_info$draft_round, ' (Pick ', extra_info$draft_pick, ') to team ', team_lookup_table$FullName[team_lookup_table$Team == extra_info$original_draft_team]),
-                              'Undrafted, or no draft info available')
-    extra_info_home = ifelse(extra_info$International == 1, 'International Game',
-                             ifelse(extra_info$Home == 1, 'Home Game', 'Away Game'))
-    extra_info_depth = paste('Depth:', extra_info$Depth)
-    if(week > 1)
-    {
-      extra_info_pct_active_gs = paste0('This season, Active for ', round(100*extra_info$Pct_Active),'% of games, and Starter for ', round(100*extra_info$Pct_GS), '% of games')
-      if(!is.na(extra_info$Pct_Active) && extra_info$Pct_Active > 0)
-      {
-        extra_info_stats_this_season = paste0('This Season, Average Touchdowns (Rushing/Receiving) Per Game: ',  round(extra_info$Avg_Total_Touchdowns,1), '<br>',
-                                              'This Season, Average Targets Per Game: ',  round(extra_info$Avg_Receiving_Tgt,1), '<br>',
-                                              'This Season, Average Receptions Per Game: ', round(extra_info$Avg_Receiving_Rec, 1), '<br>',
-                                              'This Season, Average Receiving Yards After Catch Per Game: ', round(extra_info$Avg_Receiving_YAC, 1), '<br>',
-                                              'This Season, Average Rushing Yards After Catch Per Game: ', round(extra_info$Avg_Rushing_YAC, 1), '<br>')
-      } else {
-        extra_info_stats_this_season = 'Player had no active games this year, so there are no current season stats to show.'
-      }
-    } else {
-      extra_info_stats_this_season = 'Since it is only week 1, there are no current season stats to show.'
-    }
-    if(extra_info$min_year < season) {
-      if(!is.na(extra_info$Last_Season_Pct_Active) && extra_info$Last_Season_Pct_Active > 0)
-      {
-        extra_info_stats_last_season = paste0('Last Season, Percent of Games Active: ', round(100*extra_info$Last_Season_Pct_Active), '%<br>',
-                                              'Last Season, Average Touchdowns (Rushing/Receiving) Per Game: ', round(extra_info$Last_Season_Total_Touchdowns_mean, 1), '<br>',
-                                              'Last Season, Standard Deviation of Touchdowns (Rushing/Receiving) Per Game: ', round(extra_info$Last_Season_Total_Touchdowns_sd, 2), '<br>',
-                                              'Last Season, Average Receiving 1st Downs Per Target: ', round(extra_info$Last_Season_Receiving_1D_Per_Tgt, 2), '%<br>',
-                                              'Last Season, Average Receiving Yards After Catch Per Game : ', extra_info$Last_Season_Receiving_YAC_max, '<br>')
-        
-      } else {
-        extra_info_stats_last_season = 'Player had no active games last year, so no previous season stats to show.'
-      }
-    } else {
-      extra_info_stats_last_season = 'This is the player\'s first season in the NFL, so no previous season stats to show.'
-    }
-  }
-  print(c(extra_info_min_year,
-          extra_info_draft,
-          extra_info_home,
-          extra_info_pct_active_gs,
-          extra_info_stats_this_season,
-          extra_info_stats_last_season,
-          extra_info_depth))
-  return(c(extra_info_min_year,
-           extra_info_draft,
-           extra_info_home,
-           extra_info_pct_active_gs,
-           extra_info_stats_this_season,
-           extra_info_stats_last_season,
-           extra_info_depth))
-}
+# display_extra_info = function(df, bet_type, player_name, week, season)
+# {
+#   print(week)
+#   print(season)
+#   print(extra_rushing_info)
+#   print(bet_type)
+#   print(player_name)
+#   if(bet_type == 'passing')
+#   {
+#     print('entered passing')
+#     extra_info = df %>% filter(Name == player_name)
+#     extra_info_min_year = paste0('In NFL since: ', extra_info$min_year)
+#     extra_info_draft = ifelse(!is.na(extra_info$draft_round),
+#                               paste0('Drafted Round ', extra_info$draft_round, ' (Pick ', extra_info$draft_pick, ') to team ', team_lookup_table$FullName[team_lookup_table$Team == extra_info$original_draft_team]),
+#                               'Undrafted, or no draft info available')
+#     extra_info_home = ifelse(extra_info$International == 1, 'International Game',
+#                              ifelse(extra_info$Home == 1, 'Home Game', 'Away Game'))
+#     extra_info_depth = paste('Depth:', extra_info$Depth)
+#     if(week > 1)
+#     {
+#       if(!is.na(extra_info$Pct_Active) && extra_info$Pct_Active > 0)
+#       {
+#         extra_info_pct_active_gs = paste0('This season, Active for ', round(100*extra_info$Pct_Active),'% of games, and Starter for ', round(100*extra_info$Pct_GS), '% of games')
+#         opp_defense_passyd  = round(extra_info$Opp_Avg_Defense_PassY_Allowed)
+#         opp_defense_passyd_score = ifelse(opp_defense_passyd <= 130, 'Very Good Pass Defense',
+#                                           ifelse(opp_defense_passyd <= 202, 'Pretty Good Pass Defense',
+#                                                  ifelse(opp_defense_passyd <= 241, 'Okay Pass Defense',
+#                                                         ifelse(opp_defense_passyd <= 320, 'Not Good Pass Defense',
+#                                                                'Terrible Pass Defense'))))
+#         extra_info_stats_this_season = paste0('Is the team\'s QB1: ', ifelse(extra_info$Is_Qb1 == 1, 'Yes', 'No'), '<br>',
+#                                               'Passing Yds Previous Game: ', extra_info$Passing_Yds_Lag1, '<br>',
+#                                               'This Season, Average Passing Yds Per Game: ', round(extra_info$Avg_Passing_Yds), '<br>',
+#                                               'This Season, Average Passing Attempts Per Game: ', round(extra_info$Avg_Passing_Att, 1), '<br>',
+#                                               'This Season, Average Passing 1st Downs Per Game: ', round(extra_info$Avg_Passing_1D, 1), '<br>',
+#                                               'This Season, Average Passing Completions Per Game: ', round(extra_info$Avg_Passing_Cmp,1), '<br>',
+#                                               'This Season, Average Passing TD Per Game: ', round(extra_info$Avg_Passing_TD,1), '<br>',
+#                                               'This Season, Opponent\'s Average Passing Yards Allowed Per Game: ', opp_defense_passyd, ' (', opp_defense_passyd_score,')', '<br>')
+#       } else {
+#         extra_info_stats_this_season = 'Player had no active games this season, so no current stats to show.'
+#       }
+#     } else {
+#       extra_info_stats_this_season = 'Since it is only week 1, there are no current season stats to show.'
+#     }
+#     if(extra_info$min_year < season) {
+#       if(!is.na(extra_info$Last_Season_Pct_Active) && extra_info$Last_Season_Pct_Active > 0)
+#       {
+#         extra_info_stats_last_season = paste0('Last Season, Percent of Games Active: ', round(100*extra_info$Last_Season_Pct_Active), '%<br>',
+#                                               'Last Season, Median Passing Yds Per Game: ', round(extra_info$Last_Season_Passing_Yds_median), '<br>',
+#                                               'Last Season, Passing Completion Percent: ', round(100*extra_info$Last_Season_Passing_Comp_Pct), '%<br>',
+#                                               'Last Season, Average Passing TD Per Game: ', round(extra_info$Last_Season_Passing_TD_mean,1), '<br>')
+#       } else {
+#         extra_info_stats_last_season = 'Player had no active games last season, or last season stats unavailable.'
+#       }
+#     } else {
+#       extra_info_stats_last_season = 'This is the player\'s first season in the NFL, so no previous season stats to show.'
+#     }
+#     
+#   } else if(bet_type == 'rushing')
+#   {
+#     print('entered rushing')
+#     extra_info = df %>% filter(Name == player_name)
+#     print(extra_info)
+#     extra_info_min_year = paste0('In NFL since: ', extra_info$min_year)
+#     extra_info_draft = ifelse(!is.na(extra_info$draft_round),
+#                               paste0('Drafted Round ', extra_info$draft_round, ' (Pick ', extra_info$draft_pick, ') to team ', team_lookup_table$FullName[team_lookup_table$Team == extra_info$original_draft_team]),
+#                               'Undrafted, or no draft info available')
+#     extra_info_home = ifelse(extra_info$International == 1, 'International Game',
+#                              ifelse(extra_info$Home == 1, 'Home Game', 'Away Game'))
+#     extra_info_depth = paste('Depth:', extra_info$Depth)
+#     if(week > 1)
+#     {
+#       extra_info_pct_active_gs = paste0('This season, Active for ', round(100*extra_info$Pct_Active),'% of games, and Starter for ', round(100*extra_info$Pct_GS), '% of games')
+#       opp_defense_rushyd  = round(extra_info$Opp_Avg_Defense_RushY_Allowed)
+#       opp_defense_rushyd_score = ifelse(opp_defense_rushyd <= 58, 'Very Good Rush Defense',
+#                                         ifelse(opp_defense_rushyd <= 99, 'Pretty Good Rush Defense',
+#                                                ifelse(opp_defense_rushyd <= 124, 'Okay Rush Defense',
+#                                                       ifelse(opp_defense_rushyd <= 185, 'Not Good Rush Defense',
+#                                                              'Terrible Rush Defense'))))
+#       if(!is.na(extra_info$Pct_Active) && extra_info$Pct_Active > 0)
+#       {
+#         extra_info_stats_this_season = paste0('This Season, Average Rushing Yds Per Game: ',  round(extra_info$Avg_Rushing_Yds,1),'<br>',
+#                                               'This Season, Average Rushing Attempts Per Game: ', round(extra_info$Avg_Rushing_Att,1),'<br>',
+#                                               'This Season, Average Rushing 1st Downs Per Game: ', round(extra_info$Avg_Rushing_1D, 1), '<br>',
+#                                               'Rushing Yds Previous Game: ', extra_info$Rushing_Yds_Lag1, '<br>',
+#                                               'This Season, Opponent\'s Defense Avg Rush Yards Allowed Per Game: ', opp_defense_rushyd, ' (', opp_defense_rushyd_score, ')')
+#       } else {
+#         extra_info_stats_this_season = 'Player had no active games this year, so there are no current season stats to show.'
+#       }
+#     } else {
+#       extra_info_stats_this_season = 'Since it is only week 1, there are no current season stats to show.'
+#     }
+#     if(extra_info$min_year < season) {
+#       if(!is.na(extra_info$Last_Season_Pct_Active) && extra_info$Last_Season_Pct_Active > 0)
+#       {
+#         extra_info_stats_last_season = paste0('Last Season, Percent of Games Active: ', round(100*extra_info$Last_Season_Pct_Active), '%<br>',
+#                                               'Last Season, Average Rushing Yds Per Game: ', round(extra_info$Last_Season_Rushing_Yds_mean, 1), '<br>',
+#                                               'Last Season, Highest Rushing Yds in a Game: ', round(extra_info$Last_Season_Rushing_Yds_max), '<br>',
+#                                               'Last Season, Average Rushing TD Per Game: ', round(extra_info$Last_Season_Rushing_TD_mean,1), '<br>',
+#                                               'Last Season, Average Rushing Attempts Per Game: ', round(extra_info$Last_Season_Rushing_Att_mean,1), '<br>')
+#         
+#       } else {
+#         extra_info_stats_last_season = 'Player had no active games last year, so no previous season stats to show.'
+#       }
+#     } else {
+#       extra_info_stats_last_season = 'This is the player\'s first season in the NFL, so no previous season stats to show.'
+#     }
+#     
+#     print(extra_info_min_year)
+#     print(extra_info_draft)
+#     print(extra_info_home)
+#     print(extra_info_stats_this_season)
+#     print(extra_info_stats_last_season)
+#   } else if(bet_type == 'receiving')
+#   {
+#     print('entered receiving')
+#     extra_info = df  %>% filter(Name == player_name)
+#     extra_info_min_year = paste0('In NFL since: ', extra_info$min_year)
+#     extra_info_draft = ifelse(!is.na(extra_info$draft_round),
+#                               paste0('Drafted Round ', extra_info$draft_round, ' (Pick ', extra_info$draft_pick, ') to team ', team_lookup_table$FullName[team_lookup_table$Team == extra_info$original_draft_team]),
+#                               'Undrafted, or no draft info available')
+#     extra_info_home = ifelse(extra_info$International == 1, 'International Game',
+#                              ifelse(extra_info$Home == 1, 'Home Game', 'Away Game'))
+#     extra_info_depth = paste('Depth:', extra_info$Depth)
+#     if(week > 1)
+#     {
+#       extra_info_pct_active_gs = paste0('This season, Active for ', round(100*extra_info$Pct_Active),'% of games, and Starter for ', round(100*extra_info$Pct_GS), '% of games')
+#       if(!is.na(extra_info$Pct_Active) && extra_info$Pct_Active > 0)
+#       {
+#         extra_info_stats_this_season = paste0('This Season, Average Receiving Yds Per Game: ',  round(extra_info$Avg_Receiving_Yds,1), '<br>',
+#                                               'This Season, Average Targets Per Game: ',  round(extra_info$Avg_Receiving_Tgt,1), '<br>',
+#                                               'This Season, Average Receiving 1st Downs Per Game: ', round(extra_info$Avg_Receiving_1D, 1), '<br>',
+#                                               'This Season, Average Receptions Per Game: ', round(extra_info$Avg_Receiving_Rec,1))
+#       } else {
+#         extra_info_stats_this_season = 'Player had no active games this year, so there are no current season stats to show.'
+#       }
+#     } else {
+#       extra_info_stats_this_season = 'Since it is only week 1, there are no current season stats to show.'
+#     }
+#     if(extra_info$min_year < season) {
+#       if(!is.na(extra_info$Last_Season_Pct_Active) && extra_info$Last_Season_Pct_Active > 0)
+#       {
+#         extra_info_stats_last_season = paste0('Last Season, Percent of Games Active: ', round(100*extra_info$Last_Season_Pct_Active), '%<br>',
+#                                               'Last Season, Average Receiving Yds Per Game: ', round(extra_info$Last_Season_Receiving_Yds_mean, 1), '<br>',
+#                                               'Last Season, Average Targets Per Game: ', round(extra_info$Last_Season_Receiving_Tgt_mean, 1), '<br>',
+#                                               'Last Season, Average Receiving 1st Downs Per Game: ', round(extra_info$Last_Season_Receiving_1D_mean, 2), '%<br>',
+#                                               'Last Season, Average Receiving Yards Before Catch Per Game: ', round(extra_info$Last_Season_Receiving_YBC_mean,1), '<br>',
+#                                               'Last Season, Highest Receiving Yards Before Catch Per Game: ', round(extra_info$Last_Season_Receiving_YBC_max), '<br>')
+#         
+#       } else {
+#         extra_info_stats_last_season = 'Player had no active games last year, so no previous season stats to show.'
+#       }
+#     } else {
+#       extra_info_stats_last_season = 'This is the player\'s first season in the NFL, so no previous season stats to show.'
+#     }
+#   } else {
+#     print('entered touchdown')
+#     extra_info = df %>% filter(Name == player_name)
+#     extra_info_min_year = paste0('In NFL since: ', extra_info$min_year)
+#     extra_info_draft = ifelse(!is.na(extra_info$draft_round),
+#                               paste0('Drafted Round ', extra_info$draft_round, ' (Pick ', extra_info$draft_pick, ') to team ', team_lookup_table$FullName[team_lookup_table$Team == extra_info$original_draft_team]),
+#                               'Undrafted, or no draft info available')
+#     extra_info_home = ifelse(extra_info$International == 1, 'International Game',
+#                              ifelse(extra_info$Home == 1, 'Home Game', 'Away Game'))
+#     extra_info_depth = paste('Depth:', extra_info$Depth)
+#     if(week > 1)
+#     {
+#       extra_info_pct_active_gs = paste0('This season, Active for ', round(100*extra_info$Pct_Active),'% of games, and Starter for ', round(100*extra_info$Pct_GS), '% of games')
+#       if(!is.na(extra_info$Pct_Active) && extra_info$Pct_Active > 0)
+#       {
+#         extra_info_stats_this_season = paste0('This Season, Average Touchdowns (Rushing/Receiving) Per Game: ',  round(extra_info$Avg_Total_Touchdowns,1), '<br>',
+#                                               'This Season, Average Targets Per Game: ',  round(extra_info$Avg_Receiving_Tgt,1), '<br>',
+#                                               'This Season, Average Receptions Per Game: ', round(extra_info$Avg_Receiving_Rec, 1), '<br>',
+#                                               'This Season, Average Receiving Yards After Catch Per Game: ', round(extra_info$Avg_Receiving_YAC, 1), '<br>',
+#                                               'This Season, Average Rushing Yards After Catch Per Game: ', round(extra_info$Avg_Rushing_YAC, 1), '<br>')
+#       } else {
+#         extra_info_stats_this_season = 'Player had no active games this year, so there are no current season stats to show.'
+#       }
+#     } else {
+#       extra_info_stats_this_season = 'Since it is only week 1, there are no current season stats to show.'
+#     }
+#     if(extra_info$min_year < season) {
+#       if(!is.na(extra_info$Last_Season_Pct_Active) && extra_info$Last_Season_Pct_Active > 0)
+#       {
+#         extra_info_stats_last_season = paste0('Last Season, Percent of Games Active: ', round(100*extra_info$Last_Season_Pct_Active), '%<br>',
+#                                               'Last Season, Average Touchdowns (Rushing/Receiving) Per Game: ', round(extra_info$Last_Season_Total_Touchdowns_mean, 1), '<br>',
+#                                               'Last Season, Standard Deviation of Touchdowns (Rushing/Receiving) Per Game: ', round(extra_info$Last_Season_Total_Touchdowns_sd, 2), '<br>',
+#                                               'Last Season, Average Receiving 1st Downs Per Target: ', round(extra_info$Last_Season_Receiving_1D_Per_Tgt, 2), '%<br>',
+#                                               'Last Season, Average Receiving Yards After Catch Per Game : ', extra_info$Last_Season_Receiving_YAC_max, '<br>')
+#         
+#       } else {
+#         extra_info_stats_last_season = 'Player had no active games last year, so no previous season stats to show.'
+#       }
+#     } else {
+#       extra_info_stats_last_season = 'This is the player\'s first season in the NFL, so no previous season stats to show.'
+#     }
+#   }
+#   print(c(extra_info_min_year,
+#           extra_info_draft,
+#           extra_info_home,
+#           extra_info_pct_active_gs,
+#           extra_info_stats_this_season,
+#           extra_info_stats_last_season,
+#           extra_info_depth))
+#   return(c(extra_info_min_year,
+#            extra_info_draft,
+#            extra_info_home,
+#            extra_info_pct_active_gs,
+#            extra_info_stats_this_season,
+#            extra_info_stats_last_season,
+#            extra_info_depth))
+# }
 
 
 
@@ -528,13 +617,14 @@ ui <- fluidPage(
   )
 )
 
-server <- function(input, output, session) {
+server = function(input, output, session) {
   shinyjs::hide("refresh_message")
   shinyjs::hide("refresh_bet_updates_message")
-  gids = c(passing_gid, rushing_gid, receiving_gid, touchdown_gid)
-  responses = list(passing_response, rushing_response, receiving_response, touchdown_response)
+  # gids = c(passing_gid, rushing_gid, receiving_gid, touchdown_gid)
+  # responses = list(passing_response, rushing_response, receiving_response, touchdown_response)
   
-  previous_recs = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vTyIaWWovW2YUP1-JxYpg9ZHpF7a2i_7AEVan5ptaBBiwj6gwYp0STpE8HvYILR190HTrOFt2GMyUqn/pub?gid=277208139&single=true&output=csv')
+  # previous_recs = read.csv('https://docs.google.com/spreadsheets/d/e/2PACX-1vTyIaWWovW2YUP1-JxYpg9ZHpF7a2i_7AEVan5ptaBBiwj6gwYp0STpE8HvYILR190HTrOFt2GMyUqn/pub?gid=277208139&single=true&output=csv')
+  previous_recs = get_supabase_data('betting', 'BetRecommendations')
   if(!is.null(previous_recs) && nrow(previous_recs) > 0)
   {
     most_recent_save = max(as.POSIXct(previous_recs$run_time,format = "%Y-%m-%d %I:%M %p"))
@@ -542,28 +632,23 @@ server <- function(input, output, session) {
     most_recent_save = NULL
   }
   
-  predictions = lapply(1:length(gids),
-                        pull_prediction_data,
-                        gids = gids,
-                        responses = responses) %>%
-    bind_rows()
-  
-  print(predictions)
+  predictions_res = pull_prediction_data()
+  player_info = predictions_res[[1]]
+  team_info = predictions_res[[2]]
+  predictions = predictions_res[[3]]
   
   latest_season = max(predictions$Season)
-  latest_week = max(predictions$Week)
+  latest_week = max(predictions$Week[predictions$Season == latest_season])
   latest_update_time = max(predictions$updateTime) %>% format("%Y-%m-%d %I:%M %p", tz = "America/New_York")
 
-  extra_passing_info = extra_passing_info %>% filter(Week == latest_week) %>% left_join(depth_charts %>% select(player_id, Depth), join_by('player_id'))
-  extra_rushing_info = extra_rushing_info %>% filter(Week == latest_week) %>% left_join(depth_charts %>% select(player_id, Depth), join_by('player_id'))
-  extra_receiving_info = extra_receiving_info %>% filter(Week == latest_week) %>% left_join(depth_charts %>% select(player_id, Depth), join_by('player_id'))
-  extra_touchdown_info = extra_touchdown_info %>% filter(Week == latest_week) %>% left_join(depth_charts %>% select(player_id, Depth), join_by('player_id'))
+  # extra_passing_info = extra_passing_info %>% filter(Week == latest_week) %>% left_join(depth_charts %>% select(player_id, Depth), join_by('player_id'))
+  # extra_rushing_info = extra_rushing_info %>% filter(Week == latest_week) %>% left_join(depth_charts %>% select(player_id, Depth), join_by('player_id'))
+  # extra_receiving_info = extra_receiving_info %>% filter(Week == latest_week) %>% left_join(depth_charts %>% select(player_id, Depth), join_by('player_id'))
+  # extra_touchdown_info = extra_touchdown_info %>% filter(Week == latest_week) %>% left_join(depth_charts %>% select(player_id, Depth), join_by('player_id'))
+  # 
+  predictions = predictions %>% filter(season == latest_season, Week == latest_week)
   
-  predictions = predictions %>% filter(Week == latest_week)
-  
-  props_initial = lapply(c('Passing', 'Rushing', 'Receiving', 'Touchdown'),
-                         get_props) %>%
-    bind_rows()
+  props_initial = lapply(bet_types, get_props) %>% bind_rows()
   props_initial$name = gsub('\\(.*\\)', '', props_initial$name) %>% trimws()
   
   props_reactive_val = reactiveVal(NULL) #initialize
@@ -581,7 +666,7 @@ server <- function(input, output, session) {
     output$header2 <- renderText(paste('Last updated:', latest_update_time))
   }
   
-  results <- reactive({
+  results = reactive({
     req(!is.null(props_reactive_val()))
     join_preds_and_props(preds = predictions,
                          props = props_reactive_val())
@@ -630,16 +715,16 @@ server <- function(input, output, session) {
   })
   output$team_filter_ui = renderUI({
     req(results())
-    res = results() %>% left_join(team_lookup_table, join_by('Team')) %>% select(Team, FullName) %>% distinct() %>% arrange(FullName)
+    res = results() %>% left_join(team_lookup_table, join_by('Team' == 'TV_abbr')) %>% select(Team, FullName) %>% distinct() %>% arrange(FullName)
     choices = res$Team
     names(choices) = res$FullName
     print(choices)
     pickerInput(inputId = 'team_filter', label = 'Filter on team', choices = choices, multiple = TRUE)
   })
-  output$model_accuracy_ui = renderUI({
-    req(results())
-    pickerInput(inputId = 'model_accuracy_filter', label = 'Filter on Expected Model Accuracy', choices = unique(results()$Expected_Accuracy), selected = c('High', 'Medium'), multiple = TRUE)
-  })
+  # output$model_accuracy_ui = renderUI({
+  #   req(results())
+  #   pickerInput(inputId = 'model_accuracy_filter', label = 'Filter on Expected Model Accuracy', choices = unique(results()$Expected_Accuracy), selected = c('High', 'Medium'), multiple = TRUE)
+  # })
   
   output$model_probability_slider_ui = renderUI({
     req(results())
@@ -671,10 +756,10 @@ server <- function(input, output, session) {
     {
       res = res %>% filter(Team %in% input$team_filter)
     }
-    if(!is.null(input$model_accuracy_filter))
-    {
-      res = res %>% filter(Expected_Accuracy %in% input$model_accuracy_filter)
-    }
+    # if(!is.null(input$model_accuracy_filter))
+    # {
+    #   res = res %>% filter(Expected_Accuracy %in% input$model_accuracy_filter)
+    # }
     if(!is.null(input$model_probability_slider))
     {
       res = res %>% filter(Model_Probability >= input$model_probability_slider[1]/100 & Model_Probability <= input$model_probability_slider[2]/100)

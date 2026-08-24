@@ -23,6 +23,9 @@ youtube_dlp = import('yt_dlp')
 #come back to i=7 TEN
 #come back to i=10 PHI
 #come back to i=11 SEA
+#come back to i=19 BAL -- playlist giving less videos than what's in database
+#come back to i=20 BUF -- playlist only showing 100
+
 
 
 get_transcripts = function(team_lookup, date_cutoff)
@@ -31,6 +34,7 @@ get_transcripts = function(team_lookup, date_cutoff)
   #video_data_list = rbind()
   video_data_list = readRDS('video_data_checkpoint.rds')
   t1 = Sys.time()
+  i = max(which(team_lookup$Team %in% video_data_list$team))
   for (i in 2:nrow(team_lookup))
   {
     team_start = Sys.time()
