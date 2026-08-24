@@ -12,20 +12,20 @@ The project combines NFL data collection, feature engineering, probability model
 
 Most sports prediction projects focus on predicting winners or maximizing classification accuracy. This project is built around a different objective:
 
-**produce well-calibrated probabilities that can be converted into betting decisions.**
+**Produce well-calibrated probabilities that can be converted into betting decisions.**
 
 A probability of 70% is useful only if events assigned roughly 70% probability actually occur about 70% of the time. Because expected value depends directly on predicted probability, model evaluation emphasizes calibration and log loss rather than accuracy alone.
 
 The full pipeline includes:
 
-- automated NFL data collection and feature engineering
-- separate models for team and player betting markets
-- multiple machine learning model families and ensembles
-- probability calibration and out-of-sample validation
-- sportsbook odds integration and expected-value calculation
-- correlation-aware portfolio optimization
+- Automated NFL data collection and feature engineering
+- Separate models for team and player betting markets
+- Multiple machine learning model families and ensembles
+- Probability calibration and out-of-sample validation
+- Sportsbook odds integration and expected-value calculation
+- Correlation-aware portfolio optimization
 - API endpoints for prediction, bet evaluation, and portfolio construction
-- database storage for historical and live prediction data
+- Database storage for historical and live prediction data
 
 ---
 
@@ -86,3 +86,25 @@ Portfolio Optimization API: The API takes in a group of bets and their expected 
       |
       v
 Frontend: A shiny app displays individual bet recommendations along with portfolio recommendations using the user's preferred risk tolerance.
+
+---
+
+## Expected Value Strategy
+
+Sports are inherently unpredictable, so the goal of the system is not to predict every game or player outcome with high accuracy. Instead, the objective is to estimate probabilities more accurately than the betting market.
+
+Sportsbook odds imply a probability for each outcome, incorporating the market’s collective expectations as well as the sportsbook’s margin. The model independently estimates the probability of the same event. When the model assigns a meaningfully higher probability than the probability implied by the available odds, the bet may have positive expected value (EV).
+
+For example, if sportsbook odds imply that an outcome has a 40% chance of occurring, but the model estimates the true probability at 50%, the model identifies a potential statistical edge.
+
+The strategy therefore does not require every bet to win. Individual outcomes will remain noisy and unpredictable. Instead, the goal is to repeatedly place bets where the estimated expected return is positive. If the model probabilities are well calibrated and the identified edges are real, those advantages should compound across a sufficiently large number of bets, producing positive expected returns over the long run.
+
+## Portfolio Construction
+
+Positive expected value alone is not enough to determine which bets should be placed. Many betting opportunities are correlated—for example, multiple props involving the same player, several players in the same game, or different thresholds for the same statistic.
+
+The portfolio optimizer therefore considers both expected return and risk. Using historical correlations between bet types, it constructs a diversified portfolio that seeks to maximize expected return while remaining below a configurable portfolio-risk limit.
+
+This means the system is not simply selecting the bets with the highest projected EV. It is selecting a combination of positive-EV bets whose collective risk and correlation structure produce an attractive overall portfolio.
+
+**The goal is not to predict sports perfectly; it is to identify situations where the model estimates the odds more accurately than the market and repeatedly invest where that difference creates positive expected value.**
