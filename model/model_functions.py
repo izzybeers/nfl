@@ -3,15 +3,15 @@ import pandas as pd
 import os
 from pathlib import Path
 from datetime import datetime
-from xgboost import XGBClassifier
+from xgboost import XGBClassifier, DMatrix
 from sklearn.ensemble import RandomForestClassifier, HistGradientBoostingClassifier
 from sklearn.inspection import permutation_importance
 from sklearn.model_selection import RandomizedSearchCV, StratifiedKFold
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.linear_model import LogisticRegression
+from time import perf_counter
 from scipy.stats import randint, uniform
-import os
 os.environ["KERAS_BACKEND"] = "torch"
 import keras
 from keras.models import Sequential
@@ -31,38 +31,71 @@ def write_to_supabase_predictions_table(table_name, df):
     response = supabase.schema('predictions').table(table_name).insert(data_to_insert).execute()
     return response
 
-def read_from_supabase(schema, table_name, select = '*', eq_col_name = None, eq_value = None, chunk_size = None):
+def _execute_with_retry(query, retries = 4, backoff_seconds = 2):
+    from time import sleep
+    for attempt in range(retries):
+        try:
+            return query.execute()
+        except Exception:
+            if attempt == retries - 1:
+                raise
+            sleep(backoff_seconds * (attempt + 1))
+
+def read_from_supabase(schema, table_name, select = '*', eq_col_name = None, eq_value = None, chunk_size = None, order_cols = None, keyset_pagination=False):
     if chunk_size is not None:
         df_results = pd.DataFrame()
         start_indx = 0
+        last_key_1 = None
+        last_key_2 = None
         while True:
-            if eq_col_name is None:
-                res = pd.DataFrame(supabase.schema(schema).table(table_name).select(select).range(start_indx, start_indx + chunk_size-1).execute().data)
+            query = supabase.schema(schema).table(table_name).select(select)
+            if eq_col_name is not None:
+                query = query.eq(eq_col_name, eq_value)
+            if order_cols is not None:
+                for col in order_cols:
+                    query = query.order(col)
+            if keyset_pagination:
+                if len(order_cols) != 2:
+                    raise ValueError("keyset_pagination currently requires exactly 2 order_cols")
+                if last_key_1 is not None:
+                    query = query.or_(
+                        f'{order_cols[0]}.gt.{last_key_1},'
+                        f'and({order_cols[0]}.eq.{last_key_1},'
+                        f'{order_cols[1]}.gt.{last_key_2})'
+                    )
+                query = query.limit(chunk_size)
             else:
-                res = pd.DataFrame(supabase.schema(schema).table(table_name).select(select).eq(eq_col_name, eq_value).range(start_indx, start_indx + chunk_size-1).execute().data)
-            df_results = pd.concat([df_results, res])
+                query = query.range(start_indx, start_indx + chunk_size - 1)
+            res = pd.DataFrame(_execute_with_retry(query).data)
+            if len(res) == 0:
+                break
+            df_results = pd.concat([df_results, res], ignore_index=True)
+            if keyset_pagination:
+                last_key_1 = res.iloc[-1][order_cols[0]]
+                last_key_2 = res.iloc[-1][order_cols[1]]
             if len(res) < chunk_size:
                 break
-            else:
-                start_indx = start_indx + chunk_size
+            if not keyset_pagination:
+                start_indx += chunk_size
         return df_results
     else:
         if eq_col_name is None:
-            return(pd.DataFrame(supabase.schema(schema).table(table_name).select(select).execute().data))
+            query = supabase.schema(schema).table(table_name).select(select)
         else:
-            return(pd.DataFrame(supabase.schema(schema).table(table_name).select(select).eq(eq_col_name, eq_value).execute().data))
+            query = supabase.schema(schema).table(table_name).select(select).eq(eq_col_name, eq_value)
+        return pd.DataFrame(_execute_with_retry(query).data)
 
 
-def create_model_directories(response, base_folder = 'models'):
-    response_folder_path = Path(base_folder) / response
+def create_model_directories(response, model_names = ['xgb', 'rf', 'gbm', 'neural_net'], base_folder = 'models', training_mode = True):
+    path_subdir = 'training' if training_mode else 'full_fit'
+    response_folder_path = Path(base_folder) / path_subdir / response
     response_folder_path.mkdir(parents = True, exist_ok = True)
     model_paths = []
-    for model_name in ['xgb', 'rf', 'gbm', 'neural_net']:
+    for model_name in model_names:
         model_path = Path(response_folder_path) / model_name
         model_path.mkdir(parents = True, exist_ok = True)
         model_paths.append(model_path)
     return [response_folder_path] + model_paths
-
 def run_xgboost(X_train, Y_train, combos = 100):
     
     base_xgb = XGBClassifier(
@@ -159,7 +192,7 @@ def run_gbm(X_train, Y_train, combos = 100):
     # constant and triggers sliding_window_view errors inside sklearn's
     # histogram binning.
     cv = 5
-    for col in X_train.columns:
+    for col in X_train.select_dtypes(include=['category', 'object']).columns:
         counts = X_train[col].value_counts(dropna=False)
         rare_levels = counts[counts < cv].index
         if len(rare_levels) == 0:
@@ -199,12 +232,6 @@ def run_gbm(X_train, Y_train, combos = 100):
 
     if unstable_cols:
         X_train = X_train.drop(columns=list(unstable_cols))
-
-    # Drop low-variability columns (<= 2 distinct values) as extra safety for
-    # histogram binning; this is aggressive but acceptable for smoke tests.
-    low_variability = [col for col in X_train.columns if X_train[col].nunique(dropna=True) <= 2]
-    if low_variability:
-        X_train = X_train.drop(columns=low_variability)
 
     base_gbm = HistGradientBoostingClassifier(
         early_stopping = True,
@@ -290,11 +317,17 @@ def run_neural_net(X_train, X_test, Y_train, Y_test):
     best_model = None
     best_calibrator = None
 
-    split_row = int(len(X_train_standardized) * 0.8)
-    X_model_train = X_train_standardized.iloc[:split_row]
-    Y_model_train = Y_train.iloc[:split_row]
-    X_calibration = X_train_standardized.iloc[split_row:]
-    Y_calibration = Y_train.iloc[split_row:]
+    model_split = int(len(X_train_standardized) * 0.70)
+    calibration_split = int(len(X_train_standardized) * 0.85)
+
+    X_model_train = X_train_standardized.iloc[:model_split]
+    Y_model_train = Y_train.iloc[:model_split]
+
+    X_calibration = X_train_standardized.iloc[model_split:calibration_split]
+    Y_calibration = Y_train.iloc[model_split:calibration_split]
+
+    X_selection = X_train_standardized.iloc[calibration_split:]
+    Y_selection = Y_train.iloc[calibration_split:]
     
     t1 = datetime.now()
     activation = 'relu'
@@ -339,10 +372,11 @@ def run_neural_net(X_train, X_test, Y_train, Y_test):
                                 calibrator = LogisticRegression()
                                 calibrator.fit(raw_probs.reshape(-1,1), Y_calibration)
 
-                                raw_probs_test = model.predict(X_test_standardized, verbose = 0).ravel()
-                                new_probs = calibrator.predict_proba(raw_probs_test.reshape(-1,1))[:,1]
-                                cal = calibration_score(new_probs, Y_test)
-                                running_total += calibration_score(raw_probs_test, Y_test)
+                                raw_probs_selection = model.predict(X_selection, verbose = 0).ravel()
+                                new_probs = calibrator.predict_proba(raw_probs_selection.reshape(-1,1))[:,1]
+
+                                cal = calibration_score(new_probs, Y_selection)
+                                running_total += calibration_score(raw_probs_selection, Y_selection)
                                 running_total_cal += cal
                             mean_cal = running_total_cal/3
                             print(f"Calibration score on uncalibrated model: {running_total/3}")
@@ -352,19 +386,21 @@ def run_neural_net(X_train, X_test, Y_train, Y_test):
                                 best_cal = mean_cal
                                 best_model = model
                                 best_calibrator = calibrator
-                                # best_params = {
-                                #     'dense_layer_1': dense_layer_1,
-                                #     'dense_layer_2': dense_layer_2,
-                                #     'activation': activation,
-                                #     'dropout_rate': dropout_rate,
-                                #     'optimizer_name': optimizer_name,
-                                #     'learning_rate': learning_rate,
-                                #     'batch_size': batch_size
-                                # }
+                                best_params = {
+                                    'dense_layer_1': dense_layer_1,
+                                    'dense_layer_2': dense_layer_2,
+                                    'activation': activation,
+                                    'dropout_rate': dropout_rate,
+                                    'optimizer_name': optimizer_name,
+                                    'learning_rate': learning_rate,
+                                    'batch_size': batch_size,
+                                    'epochs': 100,
+                                    'early_stopping_patience': 5
+                                }
                             print(' ')
                             print(' ')
     print(f"{round((datetime.now() - t1).total_seconds()/60,2)} minutes")
-    return [best_model, best_calibrator, preprocessing_artifacts, X_train_standardized, X_test_standardized]
+    return [best_model, best_calibrator, best_params, preprocessing_artifacts, X_train_standardized, X_test_standardized]
 
 def all_calibration_metrics_from_predictions(uncalibrated_preds, calibrated_preds, actuals):
     uncalibrated_score = calibration_score(uncalibrated_preds, actuals)
@@ -501,45 +537,114 @@ def align_categories_to_train(X_train, X_test_model):
         )
     return X_test_model
 
-def prepare_new_data(response, new_data):
+def prepare_new_data(response, new_data, train_mode = True):
     new_data = new_data.copy()
     #pull train as reference to make sure new data has in same form as train data was:
-    train = pd.read_parquet(Path(f"./ml_ready_data/train/{response}.parquet"))
+    if train_mode:
+        try:
+            train = pd.read_parquet(Path(f"./ml_ready_data/train/{response}.parquet"))
+        except Exception as e:
+            try:
+                train = pd.read_parquet(Path(f"../ml_ready_data/train/{response}.parquet"))
+            except Exception as e:
+                raise ValueError(f"Could not load train data: {e}")
+    else:
+        try:
+            train = pd.read_parquet(Path(f"./ml_ready_data/fulldata/{response}.parquet"))
+        except Exception as e:
+            try:
+                train = pd.read_parquet(Path(f"../ml_ready_data/train/{response}.parquet"))
+            except Exception as e:
+                raise ValueError(f"Could not load train data: {e}")
     X_train = train.drop(columns = [response])
     new_data = new_data.reindex(columns=X_train.columns)
+    train_numeric_cols = X_train.select_dtypes(include=[np.number]).columns
+    new_data[train_numeric_cols] = new_data[train_numeric_cols].apply(
+        pd.to_numeric,
+        errors='coerce'
+    )
     train_bool_cols = X_train.select_dtypes(include=['bool']).columns
     new_data[train_bool_cols] = new_data[train_bool_cols].astype(float)
     new_data = align_categories_to_train(X_train, new_data)
+    for df_name, df in [('X_train', X_train), ('new_data', new_data)]:
+        for col in df.select_dtypes(include='category').columns:
+            cats = df[col].cat.categories
+            if any(isinstance(x, (bool, np.bool_)) for x in cats):
+                print(df_name, col, cats.tolist(), cats.dtype)
+    for df in [X_train, new_data]:
+        bool_cat_cols = [
+            col for col in df.select_dtypes(include='category').columns
+            if pd.api.types.is_bool_dtype(df[col].cat.categories.dtype)
+        ]
+        df[bool_cat_cols] = df[bool_cat_cols].astype(float)
     return [X_train, new_data]
 
-def get_prediction_by_model_type(response, model_type, extra_calibration, root_folder, new_data):
-    X_train, new_data = prepare_new_data(response, new_data)
-    if extra_calibration:
-        model_name = 'calibrated_model'
-    else:
-        model_name = 'uncalibrated_model'
+def get_prediction_by_model_type(response, model_type, root_folder, new_data, extra_calibration = None):
+    X_train, new_data = prepare_new_data(response, new_data, 'train' in root_folder)
+
     if model_type == 'neural_net':
+        if extra_calibration is None:
+            raise ValueError ('for neural net, extra_calibration must be passed.')
+
         preprocessing_artifacts = joblib.load(f"{root_folder}neural_net/preprocessing.joblib")
         new_data_standardized = apply_saved_standardize_and_encode(new_data, preprocessing_artifacts) 
         uncalibrated_model = keras.models.load_model(f"{root_folder}neural_net/uncalibrated_model.keras")
         uncalibrated_preds = uncalibrated_model.predict(new_data_standardized, verbose = 0).ravel()
+        
         if extra_calibration:
             calibrated_model = joblib.load(f"{root_folder}neural_net/calibrated_model.joblib")
             preds = calibrated_model.predict_proba(uncalibrated_preds.reshape(-1,1))[:,1]
         else:
             preds = uncalibrated_preds     
     elif model_type in ['gbm', 'rf', 'xgb']:
-        feature_columns = joblib.load(f"{root_folder}/{model_type}/feature_columns.joblib")
+        if 'training' in root_folder:
+            if extra_calibration is None:
+                raise ValueError ('for neural net, extra_calibration must be passed.')
+            if extra_calibration:
+                model_name = 'calibrated_model'
+            else:
+                model_name = 'uncalibrated_model'
+            model = joblib.load(f"{root_folder}/{model_type}/{model_name}.joblib")
+        else:
+            model_name = 'model'
+
         model = joblib.load(f"{root_folder}/{model_type}/{model_name}.joblib")
+        feature_columns = joblib.load(f"{root_folder}/{model_type}/feature_columns.joblib")
         if model_type == 'rf':
             new_data_rf = pd.get_dummies(new_data, dummy_na=True, dtype=float)
             new_data_rf = new_data_rf.reindex(columns=feature_columns, fill_value=0)
+            new_data_rf = new_data_rf.fillna(-999)
             preds = model.predict_proba(new_data_rf)[:,1]
         else:
             new_data_model = new_data.reindex(columns=feature_columns)
             new_data_model = align_categories_to_train(X_train, new_data_model)
+            if model_type == 'xgb':
+                for col in new_data_model.select_dtypes(include='object').columns:
+                    print(
+                        "OBJECT:",
+                        col,
+                        "| train dtype:", X_train[col].dtype,
+                        "| new dtype:", new_data_model[col].dtype,
+                        "| non-null:", new_data_model[col].notna().sum(),
+                        "| values:", new_data_model[col].dropna().unique()[:5]
+                    )
+                bool_cat_cols = [
+                    col for col in new_data_model.select_dtypes(include='category').columns
+                    if pd.api.types.is_bool_dtype(
+                        new_data_model[col].cat.categories.dtype
+                    )
+                ]
+                new_data_model[bool_cat_cols] = new_data_model[bool_cat_cols].astype(float)
+
             preds = model.predict_proba(new_data_model)[:, 1]
     else: #ensembles
+        if "training" in root_folder:
+            if extra_calibration:
+                model_name = "calibrated_model"
+            else:
+                model_name = "uncalibrated_model"
+        else:
+            model_name = "model"
         each_model_pred = []
         for component_type in ['gbm', 'rf', 'xgb']:
             model = joblib.load(f"{root_folder}{component_type}/{model_name}.joblib")
@@ -547,10 +652,19 @@ def get_prediction_by_model_type(response, model_type, extra_calibration, root_f
             if component_type == 'rf':
                 new_data_rf = pd.get_dummies(new_data, dummy_na=True, dtype=float)
                 new_data_rf = new_data_rf.reindex(columns=feature_columns, fill_value=0)
+                new_data_rf = new_data_rf.fillna(-999)
                 each_model_pred.append(model.predict_proba(new_data_rf)[:,1])
             else:
                 new_data_model = new_data.reindex(columns=feature_columns)
                 new_data_model = align_categories_to_train(X_train, new_data_model)
+                if component_type == 'xgb':
+                    bool_cat_cols = [
+                        col for col in new_data_model.select_dtypes(include='category').columns
+                        if pd.api.types.is_bool_dtype(
+                            new_data_model[col].cat.categories.dtype
+                        )
+                    ]
+                    new_data_model[bool_cat_cols] = new_data_model[bool_cat_cols].astype(float)
                 each_model_pred.append(model.predict_proba(new_data_model)[:, 1])
         if model_type == 'full ensemble':
             preprocessing_artifacts = joblib.load(f"{root_folder}neural_net/preprocessing.joblib")
@@ -566,7 +680,7 @@ def get_prediction_by_model_type(response, model_type, extra_calibration, root_f
     return preds
 
 
-#df must have column: ['EV_per_100'] (expected value payout on a $100 bet)
+#df must have column: ['EVProfitPer100'] (expected value payout on a $100 bet)
 def calculate_ev_ranges(df):
     ev_categories = [
         "Very High", 
@@ -581,7 +695,7 @@ def calculate_ev_ranges(df):
     ]
     return df.assign(
         EV_Range_group = lambda x: pd.Categorical(np.select(
-            [x['EV_per_100'] > 100, x['EV_per_100'] > 50, x['EV_per_100'] > 20, x['EV_per_100'] > 0, x['EV_per_100'] > -5, x['EV_per_100'] > -20, x['EV_per_100'] > -30, x['EV_per_100'] > -50],
+            [x['EVProfitPer100'] > 100, x['EVProfitPer100'] > 50, x['EVProfitPer100'] > 20, x['EVProfitPer100'] > 0, x['EVProfitPer100'] > -5, x['EVProfitPer100'] > -20, x['EVProfitPer100'] > -30, x['EVProfitPer100'] > -50],
             ["Very High", "High", "A little high", "Slightly above break-even", "Slightly below break-even", "A little low", "Low", "Very Low"],
             default = 'Extremely Low'),
             categories = ev_categories, ordered = True
@@ -611,226 +725,96 @@ def calculate_odds_ranges(df):
     ),
     categories = odds_categories, ordered = True))
 
-def get_optimized_by_gamma(mu, Sigma, max_bets, gamma = 1):
-        if not isinstance(mu, pd.Series):
-            mu = pd.Series(mu)
-        Sigma = pd.DataFrame(Sigma, index=mu.index, columns=mu.index)
-        valid = mu.notna() & np.isfinite(mu)
-        mu = mu.loc[valid]
-        Sigma = Sigma.loc[valid, valid]
-        n = len(mu)
-        if n == 0:
-            return None
-        Dmat = 2 * gamma * Sigma + 1e-8 * np.eye(n)
-        dvec = mu.to_numpy()
-        def objective(w):
-            return 0.5 * w @ Dmat @ w - dvec @ w
-        constraints = [
-            {
-                "type": "eq",
-                "fun": lambda w: np.sum(w) - 1
-            }
+
+
+def read_bettinglines(chunk_size=1000):
+
+    results = []
+
+    # Values before any valid PK row
+    last_event_id = -1
+    last_esk = ''
+    last_market_id = ''
+    last_msk = ''
+    last_selection_id = ''
+
+    total_rows = 0
+
+    while True:
+
+        params = {
+            'p_event_id': int(last_event_id),
+            'p_esk': last_esk,
+            'p_market_id': last_market_id,
+            'p_msk': last_msk,
+            'p_selection_id': last_selection_id,
+            'p_limit': chunk_size
+        }
+
+        response = _execute_with_retry(
+            supabase
+            .schema('betting')
+            .rpc('bettinglines_keyset', params)
+        )
+
+        res = pd.DataFrame(response.data)
+
+        if len(res) == 0:
+            break
+
+        results.append(res)
+
+        pk_cols = [
+            'eventId',
+            'eventSubscriptionKey',
+            'marketId',
+            'marketSubscriptionKey',
+            'selectionId'
         ]
-        bounds = [(0, None) for _ in range(n)]
-        w0 = np.repeat(1 / n, n)
-        try:
-            sol  = minimize(objective, w0, method = 'SLSQP', bounds = bounds, constraints = constraints)
-        except Exception as e:
-            print(e)
-            return None
-        if not sol.success:
-            return None
-        w = pd.Series(sol.x, index = mu.index)
-        if max_bets is None:
-            num_bets = len(w)
-        else:
-            num_bets = min(max_bets, len(w))
-        new_w = w.sort_values(ascending=False).head(num_bets)
-        if new_w.sum() <= 0:
-            return None
-        new_w = new_w / new_w.sum()
-        return new_w
+        current = pd.concat(results, ignore_index=True)
 
-#make sure the df is already f  iltered on Odds range, risk range, manual player removal, etc
-def get_optimal_portfolio(df, correlations, max_bets = None):
-    required_cols = ['response_var', 'Model_Probability', 'Odds', 'Position', 'Week', 'label', 'team', 'opponent_team']
-    if not set(required_cols).issubset(df.columns):
-        raise Exception (f"The parameter df must contain the following columns: {', '.join(required_cols)}")
-    df = df.assign(Odds = lambda x: pd.to_numeric(x['Odds'], errors='coerce'),
-                   ProfitPer100 = lambda x: np.where(x['Odds'] > 0, x['Odds'], 100**2/(-1*x['Odds'])),
-                   EVProfitPer100 = lambda x: x['Model_Probability']*x['ProfitPer100'] - 100*(1-x['Model_Probability']),
-                   Type = lambda x: np.where(
-                    x['response_var'].isin(['anytime_td_scorer', 'team_win']),
-                    x['response_var'],
-                    x['response_var'].str.rsplit('_',n=1).str[0]
-                   ),
-                   Risk_Raw = lambda x: x['Model_Probability']*(1 - x['Model_Probability'])*(x['ProfitPer100']/100 + 1)**2,
-                   Risk_Score = lambda x: x['Risk_Raw']).query('EVProfitPer100 > 0')
-                #  update risk for bin reliability when available
-    df_with_calculations = []
-    for w in np.unique(df['Week']):
-        print(f"Running portfolio for week {w}")
-        df_this_week = df.query('Week == @w').copy()
-        df_this_week.index = df_this_week['label'] + ' ' + df_this_week['response_var']
-        cov_matrix = pd.DataFrame(
-                        np.zeros((len(df_this_week), len(df_this_week)), dtype=float),
-                        index=df_this_week.index,
-                        columns=df_this_week.index
-                    )
-        print('Calculating correlations and risk scores...')
-        for i in range(len(cov_matrix)):
-            for j in range(len(cov_matrix)):
-                if i == j:
-                    cov_matrix.iloc[i,j] = df_this_week['Risk_Score'].iloc[i]
-                else:
-                #if player is the same: correlation = 1
-                #if player fits in one of the correlation categories, assign the correct correlation based on the correlations spreadsheet
-                #otherwise, correlation = 0
-                    if (df_this_week['label'].iloc[i] == df_this_week['label'].iloc[j]) & (df_this_week['Type'].iloc[i] == df_this_week['Type'].iloc[j]):
-                        cor = 1
-                    #same player, different bet type:
-                    elif (df_this_week['label'].iloc[i] == df_this_week['label'].iloc[j]) & (df_this_week['Type'].iloc[i] != df_this_week['Type'].iloc[j]):
-                        type_i = df_this_week['Type'].iloc[i]
-                        type_j = df_this_week['Type'].iloc[j]
-                        sub = correlations[
-                            (correlations['Correlation_Type'] == 'same_player') &
-                            (
-                                ((correlations['Var1'] == type_i) & (correlations['Var2'] == type_j)) |
-                                ((correlations['Var1'] == type_j) & (correlations['Var2'] == type_i))
-                            )
-                        ]
-                        cor = 0 if sub.empty else sub['Cor'].iloc[0]
-                    #same team:
-                    elif df_this_week['team'].iloc[i] == df_this_week['team'].iloc[j]:
-                        pos_i = str(df_this_week['Position'].iloc[i])
-                        pos_j = str(df_this_week['Position'].iloc[j])
-                        sub = correlations[
-                            (correlations['Correlation_Type'] == 'same_team') &
-                            (correlations['Var1'] == df_this_week['Type'].iloc[i]) &
-                            (correlations['Var2'] == df_this_week['Type'].iloc[j])
-                        ]
-                        if not sub.empty and {'Position1', 'Position2'}.issubset(sub.columns):
-                            sub = sub[
-                                sub.apply(
-                                    lambda row:
-                                        (pd.isna(row['Position1']) or pos_i in str(row['Position1'])) and
-                                        (pd.isna(row['Position2']) or pos_j in str(row['Position2'])),
-                                    axis=1
-                                )
-                            ]
-                        cor = 0 if sub.empty else sub['Cor'].iloc[0]
-                    #opposing teams:
-                    elif df_this_week['team'].iloc[i] == df_this_week['opponent_team'].iloc[j]:
-                        pos_i = str(df_this_week['Position'].iloc[i])
-                        pos_j = str(df_this_week['Position'].iloc[j])
-                        sub = correlations[
-                            (correlations['Correlation_Type'] == 'opp_team') &
-                            (correlations['Var1'] == df_this_week['Type'].iloc[i]) &
-                            (correlations['Var2'] == df_this_week['Type'].iloc[j])
-                        ]
-                        if not sub.empty and {'Position1', 'Position2'}.issubset(sub.columns):
-                            sub = sub[
-                                sub.apply(
-                                    lambda row:
-                                        (pd.isna(row['Position1']) or pos_i in str(row['Position1'])) and
-                                        (pd.isna(row['Position2']) or pos_j in str(row['Position2'])),
-                                    axis=1
-                                )
-                            ]
-                        cor = 0 if sub.empty else sub['Cor'].iloc[0]
-                    #unrelated games:
-                    else:
-                        cor = 0
-                    cov_matrix.iloc[i, j] = (cor * np.sqrt(df_this_week['Risk_Score'].iloc[i])* np.sqrt(df_this_week['Risk_Score'].iloc[j]))
+        print(
+            f"Rows returned: {len(current):,} | "
+        )
 
-        print('Estimating Sigma...')
-        mu = df_this_week['EVProfitPer100']/100
-        mu.index = cov_matrix.columns
-        Sigma = (cov_matrix + cov_matrix.T) / 2
-        Sigma = Sigma.astype(float)
-        eigvals = np.linalg.eigvalsh(Sigma.to_numpy())
-        min_eig = eigvals.min()
-        if min_eig > -1e-8:
-            # Matrix is already PSD up to floating-point noise.
-            # Add tiny ridge to make it strictly positive definite.
-            Sigma = Sigma + np.eye(len(Sigma)) * 1e-8
-        else:
-            # Real PSD problem; use nearPD fallback.
-            try:
-                Sigma = pd.DataFrame(
-                    cov_nearest(Sigma.to_numpy(), method="nearest", threshold=1e-10),
-                    index=Sigma.index,
-                    columns=Sigma.columns
-                )
-            except np.linalg.LinAlgError:
-                Sigma = pd.DataFrame(
-                    cov_nearest(Sigma.to_numpy(), method="clipped", threshold=1e-10),
-                    index=Sigma.index,
-                    columns=Sigma.columns
-                )
-        gammas = 10 ** np.linspace(-3, 3, 100)
+        total_rows += len(res)
+        print(f'Rows pulled: {total_rows:,}')
 
-        n = len(mu)
-        max_bets_this_week = n if max_bets is None else min(max_bets, n)
-        if n == 1:
-            selected_rows = df_this_week.copy()
-            selected_rows['Portfolio_Weight'] = 1.0
-            selected_rows['Portfolio_Mu'] = mu.iloc[0]
-            selected_rows['Portfolio_Var'] = Sigma.iloc[0, 0]
-            selected_rows['Portfolio_SD'] = np.sqrt(Sigma.iloc[0, 0])
-            selected_rows['Portfolio_Sharpe'] = (
-                selected_rows['Portfolio_Mu'].iloc[0] / selected_rows['Portfolio_SD'].iloc[0]
-                if selected_rows['Portfolio_SD'].iloc[0] > 0
-                else np.nan
-            )
-            df_with_calculations.append(selected_rows)
-            continue
-        
-        print('Calculating weights...')
-        weights = [get_optimized_by_gamma(mu, Sigma, max_bets_this_week, gamma = g) for g in gammas]
+        # Cursor = PK of final row returned
+        last_row = res.iloc[-1]
 
-        mu_vec = np.full(len(gammas), np.nan)
-        sd_vec = np.full(len(gammas), np.nan)
-        sharpe_vec = np.full(len(gammas), np.nan)
+        new_cursor = (
+            last_row['eventId'],
+            last_row['eventSubscriptionKey'],
+            last_row['marketId'],
+            last_row['marketSubscriptionKey'],
+            last_row['selectionId']
+        )
 
-        full_weights_list = []
+        old_cursor = (
+            last_event_id,
+            last_esk,
+            last_market_id,
+            last_msk,
+            last_selection_id
+        )
 
-        for wgt in range(len(weights)):
-            these_weights = weights[wgt]
-            if these_weights is not None and these_weights.notna().all():
-                mu_portfolio = sum(these_weights * mu[these_weights.index])
-                var_portfolio = these_weights.to_numpy() @ Sigma.loc[these_weights.index, these_weights.index].to_numpy() @ these_weights.to_numpy()
-                sd_portfolio = np.sqrt(var_portfolio)
-                sharpe_val = mu_portfolio / sd_portfolio if sd_portfolio > 0 else np.nan
-                mu_vec[wgt]     = mu_portfolio
-                sd_vec[wgt]     = sd_portfolio
-                sharpe_vec[wgt] = sharpe_val
-                
-                weights_df = these_weights.to_frame('Portfolio_Weight')
-                bet_rows = df_this_week.loc[weights_df.index].copy()
-                
-                full_weights_list.append({
-                    'weights': weights_df,
-                    'bet_rows': bet_rows,
-                    'mu': mu_portfolio,
-                    'var': var_portfolio,
-                    'sd': sd_portfolio,
-                    'sharpe': sharpe_val
-                })
-        if len(full_weights_list) == 0:
-            continue
-        
-        best_indx = np.nanargmax([x['sharpe'] for x in full_weights_list])
-        best_portfolio = full_weights_list[best_indx]
-        selected_rows = best_portfolio['bet_rows'].copy()
-        selected_rows['Portfolio_Weight'] = best_portfolio['weights']['Portfolio_Weight']
-        selected_rows['Portfolio_Mu'] = best_portfolio['mu']
-        selected_rows['Portfolio_Var'] = best_portfolio['var']
-        selected_rows['Portfolio_SD'] = best_portfolio['sd']
-        selected_rows['Portfolio_Sharpe'] = best_portfolio['sharpe']
+        # Protect against accidentally getting stuck on the same page forever
+        if new_cursor == old_cursor:
+            raise RuntimeError(f'BettingLines cursor did not advance: {new_cursor}')
 
-    if len(df_with_calculations) == 0:
+        (
+            last_event_id,
+            last_esk,
+            last_market_id,
+            last_msk,
+            last_selection_id
+        ) = new_cursor
+
+        if len(res) < chunk_size:
+            break
+
+    if len(results) == 0:
         return pd.DataFrame()
 
-    return pd.concat(df_with_calculations, axis=0).reset_index(drop=True)
-                    
+    return pd.concat(results, ignore_index=True)
