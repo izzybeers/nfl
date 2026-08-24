@@ -86,7 +86,7 @@ Portfolio Optimization API: The API takes in a group of bets and their expected 
       |
       v
 Frontend: A shiny app displays individual bet recommendations along with portfolio recommendations using the user's preferred risk tolerance.
-
+```
 ---
 
 ## Expected Value Strategy
