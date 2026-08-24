@@ -1,5 +1,6 @@
 library(slider)
 library(dplyr)
+
 library(nflreadr)
 library(jsonlite)
 
@@ -46,43 +47,120 @@ compute_slider_cumulatives = function(df, cols_to_include, cumulative_only) {
 SUPABASE_URL <- "https://tvvhvzodwrbkgdpzzrxq.supabase.co"
 SUPABASE_KEY <- "sb_publishable_K2dD8bfEwXpx0koy8t4tLA_mZ5BJN_Z"
 
-get_supabase_data = function(schema, table_name, additional_sql = '', select = '*')
+get_supabase_data <- function(schema, table_name, additional_sql = list(), select = "*")
 {
-  url <- paste0(SUPABASE_URL, "/rest/v1/", table_name, "?select=", select, additional_sql)
+  url <- paste0(SUPABASE_URL, "/rest/v1/", table_name)
   
-  # Make the Request
   response <- GET(
     url,
+    query = c(
+      list(select = select),
+      additional_sql
+    ),
     add_headers(
       "apikey" = SUPABASE_KEY,
       "Authorization" = paste("Bearer", SUPABASE_KEY),
-      # CRITICAL: This tells Supabase which schema to look in!
-      "Accept-Profile" = schema 
+      "Accept-Profile" = schema
     )
   )
-  return(fromJSON(content(response, 'text', encoding = 'UTF-8')))
+  
+  if (http_error(response)) {
+    stop(content(response, "text", encoding = "UTF-8"))
+  }
+  
+  fromJSON(content(response, "text", encoding = "UTF-8"))
 }
 
-
-write_to_supabase = function(schema, table_name, df)
+write_to_supabase = function(schema, table_name, df, batch_size = 500)
 {
   url = paste0(SUPABASE_URL, "/rest/v1/", table_name)
-  body_data = toJSON(df, dataframe = "rows", auto_unbox = TRUE)
+  
+  for (start_row in seq(1, nrow(df), by = batch_size))
+  {
+    end_row = min(start_row + batch_size - 1, nrow(df))
+    
+    batch = df[start_row:end_row, ]
+    
+    body_data = toJSON(
+      batch,
+      dataframe = "rows",
+      auto_unbox = TRUE,
+      na = "null",
+      null = "null",
+      digits = NA
+    )
+    
+    response = POST(
+      url,
+      add_headers(
+        "apikey" = SUPABASE_KEY,
+        "Authorization" = paste("Bearer", SUPABASE_KEY),
+        "Content-Type" = "application/json",
+        "Content-Profile" = schema,
+        "Prefer" = "return=minimal"
+      ),
+      body = body_data
+    )
+    
+    if (http_error(response))
+    {
+      stop(
+        paste(
+          "Failed on rows", start_row, "to", end_row, ":",
+          content(response, "text", encoding = "UTF-8")
+        )
+      )
+    }
+    
+    print(paste("Wrote rows", start_row, "to", end_row))
+  }
+  
+  print(paste("Successfully wrote", nrow(df), "rows to", table_name))
+  return(TRUE)
+}
+
+upsert_to_supabase = function(schema, table_name, df, conflict_cols)
+{
+  if (length(conflict_cols) == 0) {
+    stop("conflict_cols must contain at least one column name")
+  }
+  
+  missing_cols = setdiff(conflict_cols, names(df))
+  if (length(missing_cols) > 0) {
+    stop(paste(
+      "These conflict columns are missing from df:",
+      paste(missing_cols, collapse = ", ")
+    ))
+  }
+  
+  url = modify_url(
+    paste0(SUPABASE_URL, "/rest/v1/", table_name),
+    query = list(
+      on_conflict = paste(conflict_cols, collapse = ",")
+    )
+  )
+  
+  body_data = toJSON(df, dataframe = "rows", auto_unbox = TRUE, na = "null")
+  
   response = POST(
     url,
     add_headers(
       "apikey" = SUPABASE_KEY,
       "Authorization" = paste("Bearer", SUPABASE_KEY),
       "Content-Type" = "application/json",
-      "Content-Profile" = schema,          # Use Content-Profile for POST/PATCH
-      "Prefer" = "return=minimal"          # Speeds up request by not returning the inserted rows
+      "Content-Profile" = schema,
+      "Prefer" = "resolution=merge-duplicates,return=minimal"
     ),
     body = body_data
   )
+  
   if (http_error(response)) {
-    stop(paste("Failed to write to Supabase:", content(response, "text", encoding = "UTF-8")))
+    stop(paste(
+      "Failed to upsert to Supabase:",
+      content(response, "text", encoding = "UTF-8")
+    ))
   } else {
-    print(paste("Successfully wrote", nrow(df), "rows to", table_name))
+    print(paste("Successfully upserted", nrow(df), "rows to", table_name))
     return(TRUE)
   }
 }
@@ -152,7 +230,7 @@ week_dates = week_end_dates_by_team %>%
   left_join(previous_game_info, join_by('season', 'team', 'week')) %>%
   mutate(
     week_start = case_when(
-      is.na(previous_game_end) ~ as.POSIXct(paste0(season, '-08-01 00:00:00')),
+      is.na(previous_game_end) ~ as.POSIXct(paste0(season, '-07-01 00:00:00')),
       TRUE ~ as.POSIXct(previous_game_end) + 1
     ),
     week_end = as.POSIXct(week_end)
@@ -235,3 +313,67 @@ opp_calc_metrics = list(
   opp_defense_rushing_yards_per_carry_allowed = c('cumulative_opp_defense_rushing_yards_allowed', 'cumulative_opp_defense_carries_allowed'),
   opp_defense_fg_dependency_allowed = c('cumulative_opp_defense_total_fg_attempts_allowed','cumulative_opp_defense_drives_allowed')
 )
+
+zero_if_played_cols = c(
+  "completions", "attempts", "passing_yards", "passing_tds",
+  "passing_interceptions", "sacks_suffered", "sack_yards_lost",
+  "sack_fumbles", "sack_fumbles_lost", "passing_air_yards",
+  "passing_yards_after_catch", "passing_first_downs",
+  "passing_2pt_conversions",
+  
+  "carries", "rushing_yards", "rushing_tds",
+  "rushing_fumbles", "rushing_fumbles_lost",
+  "rushing_first_downs", "rushing_2pt_conversions",
+  
+  "receptions", "targets", "receiving_yards", "receiving_tds",
+  "receiving_fumbles", "receiving_fumbles_lost",
+  "receiving_air_yards", "receiving_yards_after_catch",
+  "receiving_first_downs", "receiving_2pt_conversions",
+  
+  "penalties", "penalty_yards", "special_teams_tds"
+)
+
+team_game_cols = c(
+  "team_total_carries",
+  "team_total_rushing_yards",
+  "team_total_passing_yards",
+  "team_total_passing_attempts",
+  "team_total_air_yards",
+  "team_total_intended_air_yards",
+  
+  "team_drives",
+  "team_drives_in_redzone",
+  "team_touchdowns_in_redzone",
+  "team_redzone_plays",
+  "team_redzone_receiving_plays",
+  "team_redzone_rushing_plays",
+  "team_total_fg_attempts"
+)
+
+
+get_forecasted_weather = function(timestamp, lat, long)
+{
+  api_key = 'e4042a3d60cf937c4064161a86429bc2'
+  url = paste0("https://api.openweathermap.org/data/3.0/onecall",
+               "?lat=", lat,
+               "&lon=", long,
+               "&type=hour",
+               "&units=imperial",
+               "&appid=", api_key)
+  
+  res = GET(url)
+  results = content(res, as = "parsed")
+  if(difftime(timestamp, Sys.time(), units = "hours") %>% as.numeric() < 47 & difftime(timestamp, Sys.time(), units = "hours") %>% as.numeric() > 0)
+  {
+    index = which(sapply(1:length(results$hourly), function(x) as.POSIXct(results$hourly[[x]]$dt, origin = "1970-01-01", tz = "America/New_York") == timestamp))
+    temp = results$hourly[[index]]$temp
+    #visibility = results$hourly[[index]]$visibility
+    wind = results$hourly[[index]]$wind_speed
+  } else {
+    temp = NA %>% as.numeric()
+    #visibility = NA %>% as.numeric()
+    wind = NA %>% as.numeric()
+  }
+  return(list(temp = temp, wind = wind))
+}
+

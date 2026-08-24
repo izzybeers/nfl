@@ -1,5 +1,5 @@
 
-get_team_data = function(min_year, max_year, schedules_df, team_lookup_df)
+get_team_data = function(min_year, max_year, schedules_df, team_lookup_df, wk = NULL, test_mode = FALSE)
 {
  schedules = schedules_df %>%
     mutate(stadium = ifelse(location == 'home', team, ifelse(location == 'away', opponent, NA)),
@@ -19,22 +19,56 @@ get_team_data = function(min_year, max_year, schedules_df, team_lookup_df)
            team_differential = team_score - opponent_score,
            long_travel = !is.na(Game_Coast) & !is.na(Coast.x) & Game_Coast != Coast.x,
            opp_long_travel = !is.na(Game_Coast) & !is.na(Coast.y) & Game_Coast != Coast.y) %>%
-    select(game_id, season, week, team, team_score, opponent_score, team_win, team_differential, home_stadium, neutral_field, short_week, long_week, gameday, gametime, weekday, wind, temp, familiar_temperature, opp_familiar_temperature, stadium_grass_type, stadium_roof,
-           familiar_grass_type, familiar_roof_type, long_travel, opp_long_travel, referee, team_coach, team_qb_id, div_game, overtime)
+    select(game_id, season, week, team, opponent, team_score, opponent_score, team_win, team_differential, home_stadium, neutral_field, short_week, long_week, gameday, gametime, weekday, wind, temp, familiar_temperature, opp_familiar_temperature, stadium_grass_type, stadium_roof,
+           familiar_grass_type, familiar_roof_type, long_travel, opp_long_travel, referee, team_coach, team_qb_id, div_game, overtime) %>%
+   rename(opponent_team = opponent)
   
   
-  orig_teamgl = load_team_stats(seasons = min_year:max_year) %>% select(season, week, team, opponent_team, 
+  orig_teamgl = load_team_stats(seasons = min_year:max_year) %>% select(season, week, team, 
                                                                    completions, attempts, passing_yards, passing_tds, passing_interceptions, sacks_suffered, sack_yards_lost, sack_fumbles, sack_fumbles_lost, passing_air_yards, passing_yards_after_catch, passing_first_downs, passing_2pt_conversions, 
                                                                    carries, rushing_yards, rushing_tds, rushing_fumbles, rushing_fumbles_lost, rushing_first_downs, rushing_2pt_conversions,
                                                                    receiving_fumbles, receiving_fumbles_lost,
                                                                    special_teams_tds, penalties, penalty_yards)
   colnames(orig_teamgl)[-which(colnames(orig_teamgl) %in% c('season', 'week', 'team', 'opponent_team'))] = paste0('team_', colnames(orig_teamgl)[-which(colnames(orig_teamgl) %in% c('season', 'week', 'team', 'opponent_team'))])
   
+  if(test_mode)
+  {
+    orig_teamgl = orig_teamgl %>% filter(!(season == max_year & week >= wk))
+  }
+  teamgl = orig_teamgl %>% left_join(schedules, join_by('season', 'week', 'team'))
   
-
-  teamgl = orig_teamgl %>% left_join(schedules, join_by('season', 'week', 'team')) 
+  if(!is.null(wk))
+  {
+    upcoming_week_schedule = schedules %>% filter(season == max_year & week == wk) %>% select(
+      season, week, team, opponent_team,
+      game_id,
+      home_stadium,
+      neutral_field,
+      short_week,
+      long_week,
+      gameday,
+      gametime,
+      weekday,
+      stadium_grass_type,
+      stadium_roof,
+      familiar_grass_type,
+      familiar_roof_type,
+      long_travel,
+      opp_long_travel,
+      referee,
+      team_coach,
+      team_qb_id,
+      div_game
+    )
+    teamgl = teamgl %>% bind_rows(upcoming_week_schedule)
+  }
   
   play_details = load_pbp((max(min_year,2022)):max_year)  %>% filter(!is.na(posteam))
+  
+  if(test_mode)
+  {
+    play_details = play_details %>% filter(!(season == max_year & week >= wk))
+  }
   
   team_redzone_drives = play_details %>%
     group_by(season, week, game_id, posteam, drive) %>% summarise(drive_in_redzone = any(yardline_100 < 20 & !(play_type %in% c('extra_point', 'kickoff','no_play', 'qb_kneel', 'qb_spike'))),
@@ -42,7 +76,13 @@ get_team_data = function(min_year, max_year, schedules_df, team_lookup_df)
                                                         team_redzone_plays = sum(play_type %in% c('pass', 'punt', 'run') & yardline_100 < 20, na.rm=TRUE),
                                                         team_redzone_receiving_plays = sum(play_type == 'pass' & yardline_100 < 20, na.rm=TRUE),
                                                         team_redzone_rushing_plays = sum(play_type == 'run' & yardline_100 < 20, na.rm=TRUE),
-                                                        fg_attempts = sum(field_goal_attempt,na.rm=T), .groups = "drop") %>%
+                                                        fg_attempts = sum(field_goal_attempt,na.rm=T), .groups = "drop")
+  
+  if (test_mode)
+  {
+    team_redzone_drives = team_redzone_drives %>% filter(!(season == max_year & week >= wk))
+  }
+  team_redzone_drives = team_redzone_drives %>%
     group_by(game_id, season, week, posteam) %>%
     summarise(team_drives = length(unique(drive)),
               team_drives_in_redzone = sum(drive_in_redzone, na.rm = TRUE),
@@ -301,41 +341,46 @@ calculate_team_seasonal_historical_stats = function(team_data, opp_data, team_ca
               team_column_categories))
 }
 
-pull_all_team_stats = function(min_year, max_year, recalculate_seasonal = FALSE)
+pull_all_team_stats = function(min_year, max_year, wk = NULL, test_mode = FALSE)
 {
-  team_opp_data = get_team_data(min_year, max_year, schedules_df = schedules_raw, team_lookup_df = team_lookup_table)
+  if (is.null(wk))
+  {
+    team_opp_data = get_team_data(min_year, max_year, schedules_df = schedules_raw, team_lookup_df = team_lookup_table)
+  } else if (wk > 1) {
+    team_opp_data = get_team_data(min_year, max_year, schedules_df = schedules_raw, team_lookup_df = team_lookup_table, wk = wk, test_mode = test_mode)
+  } else {
+    team_opp_data = get_team_data(min_year, max_year, schedules_df = schedules_raw, team_lookup_df = team_lookup_table, wk = wk, test_mode = test_mode)
+  }
+  
   team_data = team_opp_data[[1]]
   opp_data = team_opp_data[[2]]
   team_redzone_drives = team_opp_data[[3]]
   cleaned_schedules_df = team_opp_data[[4]]
   
+  #don't forget to remove the lines filtering on week 5 2025 when testing is done
+  
+  
   team_opp_current_season_stats = summarize_current_season_team_stats(team_data = team_data, opp_data = opp_data,
                                                                         team_calc_metrics = team_calc_metrics, opp_calc_metrics = opp_calc_metrics,
                                                                         schedules = cleaned_schedules_df)
+  #repeat the same metric as we did for players for wk 1 with all NAs filled in.
   team_current_season_stats = team_opp_current_season_stats[[1]]
   opp_current_season_stats = team_opp_current_season_stats[[2]]
   team_column_categories_current_season = team_opp_current_season_stats[[3]]
   
-  if(recalculate_seasonal == TRUE)
+  team_opp_historical_season_stats = calculate_team_seasonal_historical_stats(team_data = team_data, opp_data = opp_data,
+                                                                              team_calc_metrics = team_calc_metrics, opp_calc_metrics = opp_calc_metrics,
+                                                                              schedules = cleaned_schedules_df,
+                                                                              team_column_categories = team_column_categories_current_season)
+  team_historical_season_stats = team_opp_historical_season_stats[[1]]
+  opp_historical_season_stats = team_opp_historical_season_stats[[2]]
+  team_column_categories = team_opp_historical_season_stats[[3]]
+  
+  for(name in c('team_historical_seasons_stats', 'opp_historical_seasons_stats'))
   {
-    team_opp_historical_season_stats = calculate_team_seasonal_historical_stats(team_data = team_data, opp_data = opp_data,
-                                                                                team_calc_metrics = team_calc_metrics, opp_calc_metrics = opp_calc_metrics,
-                                                                                schedules = cleaned_schedules_df,
-                                                                                team_column_categories = team_column_categories_current_season)
-    team_historical_season_stats = team_opp_historical_season_stats[[1]]
-    opp_historical_season_stats = team_opp_historical_season_stats[[2]]
-    team_column_categories = team_opp_historical_season_stats[[3]]
-    
-    for(name in c('team_historical_seasons_stats', 'opp_historical_seasons_stats'))
-    {
-      team_column_categories[[name]] = 
-        c(paste0('Last_Season_', team_column_categories[[name]]),
-          paste0('Two_Seasons_Ago_', team_column_categories[[name]]))
-    }
-  } else {
-    #team_historical_season_stats = #read from supabase
-    #opp_historical_season_stats = #read from supabase
-    #team_column_categories_historical_seasons = #read from somewhere
+    team_column_categories[[name]] = 
+      c(paste0('Last_Season_', team_column_categories[[name]]),
+        paste0('Two_Seasons_Ago_', team_column_categories[[name]]))
   }
     
   team_data_combined = team_current_season_stats %>%
@@ -366,4 +411,25 @@ pull_all_team_stats = function(min_year, max_year, recalculate_seasonal = FALSE)
   team_column_categories[['team_current_season_stats']] = c(team_column_categories[['team_current_season_stats']], 'coach_previous_weeks_with_team')
   
   return(list(team_data_combined, opp_data_combined, team_column_categories, team_redzone_drives))
+}
+
+get_weather = function(games, team_lookup)
+{
+  games = games %>%
+    mutate(posix_timestamp_game =  as.POSIXct(paste0(gameday, ' ', substring(gametime,1,3),'00'), tz = "America/New_York"),
+           stadium = ifelse(neutral_field, NA, ifelse(home_stadium, team, opponent_team))) %>% filter(posix_timestamp_game > Sys.time())
+  
+  nondome_games_with_weather = games %>% filter(stadium_roof == 'Open') %>%
+    left_join(team_lookup %>% select(TV_abbr, Latitude, Longitude), join_by('stadium' == 'TV_abbr')) %>% ungroup() %>%
+    select(season, week, gameday, posix_timestamp_game, stadium, Latitude, Longitude) %>% distinct() %>%
+    mutate(weather = future_pmap(list(posix_timestamp_game, Latitude, Longitude),
+                                 ~ get_forecasted_weather(timestamp = ..1, lat = ..2, long = ..3))) %>%
+    unnest_wider(weather, names_sep = "_") %>%
+    rename('temp' = 'weather_temp', 'wind' = 'weather_wind')
+  
+  games_with_weather = games %>%
+    left_join(nondome_games_with_weather %>% select(stadium, week, season, temp, wind), join_by('stadium' == 'stadium', 'week' == 'week', 'season' == 'season')) %>%
+    arrange(season, week)
+  
+  return(games_with_weather %>% select(-posix_timestamp_game, -stadium))
 }
