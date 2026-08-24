@@ -4,69 +4,23 @@ library(scorecard)
 library(tidyr)
 library(furrr)
 
-# run_xgboost = function(train, test, response, combos = 20)
-# {
-#   train = train %>% ungroup() %>% select(-any_of(c('gsis_id', 'team', 'display_name', 'game_id')))
-#   train[[response]]= as.factor(train[[response]])
-#   train = train %>% mutate(across(where(is.logical), ~ as.factor(.x)))
-#   test = test %>% ungroup() %>% select(-any_of(c('gsis_id', 'team', 'display_name', 'game_id')))
-#   test[[response]] = as.factor(test[[response]])
-#   test = test %>% mutate(across(where(is.logical), ~ as.factor(.x)))
-#   
-#   #XGBOOST
-#   #create model spec:
-#   xgb_spec = boost_tree(
-#     trees = tune(),
-#     tree_depth = tune(),
-#     min_n = tune(),
-#     learn_rate = tune()
-#   ) %>% set_engine('xgboost') %>% set_mode('classification')
-#   
-#   #create grid:
-#   xgb_grid = grid_space_filling(
-#     trees(),
-#     tree_depth(), 
-#     min_n(),
-#     learn_rate(),
-#     size = combos #number of hyperparameter combinations to try
-#   )
-#   
-#   xgb_recipe = recipe(as.formula(paste0(response, '~ .')), train)  %>%
-#     step_zv(all_predictors()) %>%
-#     step_unknown(all_nominal_predictors(), new_level = "unknown") %>%
-#     step_dummy(all_nominal_predictors(), one_hot = TRUE, sparse = 'no')
-#   
-#   xgb_workflow = workflow() %>% add_recipe(xgb_recipe) %>% add_model(xgb_spec)
-#   
-#   folds = vfold_cv(train, v = 5)
-#   
-#   my_metrics = metric_set(mn_log_loss)
-#   
-#   #tune:
-#   set.seed(1)
-#   xgb_res = tune_grid(
-#     xgb_workflow,
-#     resamples = folds,
-#     grid = xgb_grid,
-#     metrics = my_metrics
-#   )
-#   
-#   best_params = select_best(xgb_res, metric = 'mn_log_loss')
-#   best_results = show_best(xgb_res, metric = 'mn_log_loss', n = 1)
-#   
-#   final_xgb_workflow = finalize_workflow(
-#     xgb_workflow,
-#     best_params
-#   )
-#   
-#   final_xgb_fit = fit(final_xgb_workflow, data = train)
-#   
-#   preds = predict(final_xgb_fit,test, type = 'prob')$.pred_1
-#   actuals = as.numeric(test[[response]])-1
-#   preds_df = data.frame(preds, actuals)
-#   
-#   return(list(final_xgb_fit, best_params, best_results, preds_df, vi(final_xgb_fit)))
-# }
+
+passing_numbers = c(150, 180, 210, 240, 270, 300, 330, 360)
+rushing_numbers = c(25, 40, 60, 80, 100, 120, 140)
+receiving_numbers = c(25, 40, 60, 80, 100, 120, 140)
+rushing_receiving_numbers = c(40, 70, 100, 130)
+reception_numbers = c(4,6,8,10)
+spread_numbers = c(-2.5, 2.5, -3.5, 3.5, -6.5, 6.5, -7.5, 7.5)
+
+options(future.globals.maxSize = 5 * 1024^3) 
+plan(multisession, workers = availableCores() - 1)
+
+this_or_that = data.frame(cbind(option1 = c('draft_round', 'stadium_grass_type', 'stadium_roof'),
+                                option2 = c('draft_pick', 'familiar_grass_type', 'familiar_roof_type')))
+
+
+
+
 
 categorize_stats_fields = function(column_categories, column_category_current, past_season_column_category)
 {
@@ -357,53 +311,9 @@ create_iv_tables = function(df, r, var_list, column_categories, specific_bins = 
   }
   return(list(all_ivs,all_bins))
 }
-# 
-# get_specific_iv_table = function(df, iv_table, bin_table, predictive_power_choice, column_categories, bin_iv_limit)
-# {
-#   if(predictive_power_choice != 'Significant')
-#   {
-#     iv_predictive_power = iv_table %>%
-#       filter(Predictive_Power == predictive_power_choice) %>%
-#       select(Variable, Response, display) %>% arrange(Variable, Response)
-#   } else {
-#     iv_predictive_power = iv_table %>%
-#       filter(Predictive_Power != 'None') %>%
-#       select(Variable, Response, display) %>% arrange(Variable, Response)
-#   }
-#   
-#   bins_cleaned = rbind()
-#   
-#   for(i in unique(iv_predictive_power$Variable))
-#   {
-#     if(predictive_power_choice != 'Significant')
-#     {
-#       subtable = bin_table %>% filter(Variable == i & Predictive_Power == predictive_power_choice) 
-#     } else {
-#       subtable = bin_table %>% filter(Variable == i)
-#     }
-#     if(all(!is.na(subtable$specific_count)))
-#     {
-#       if(i %in% column_categories$player_bio_data)
-#       {
-#         reference_number = length(unique(df$player_id))
-#       }
-#       if (i %in% column_categories$stadium_info)
-#       {
-#         reference_number = length(unique(df$Stadium))
-#       }
-#       subtable = subtable %>% filter(specific_count >= reference_number*0.1 & Bin_IV >= bin_iv_limit)
-#     } else {
-#       subtable = subtable %>% filter(Bin_IV >= bin_iv_limit)
-#     }
-#     bins_cleaned = rbind(bins_cleaned, subtable)
-#   }
-#   return(bins_cleaned)
-# }
-
 
 this_or_that_results = function(ivs, this_or_that, r)
 {
-  #this_or_that[,paste0('decision_',responses)] = NA
   this_or_that$decision = NA
   for(t in 1:nrow(this_or_that))
   {
@@ -481,8 +391,14 @@ trim_data = function(train, test, final_test, r, raw_response_var, missing_pct, 
   #removing fields_to_use_bins because it's just college and college_conference, and it's not worth complicating the workflow for fields that can be described by draft round. 
   selected_fields = c(column_categories$identifiers, all_stats_fields$Stat, fields_to_use_as_is, setdiff(exclude_from_information_value, exclude_from_model), paste0(raw_response_var, '_lag1'), paste0(raw_response_var, '_lag2'), paste0(raw_response_var, '_lag3'))
   training_data = train %>% select(r, any_of(selected_fields))
-  test_data = test %>% select(r, any_of(selected_fields))
-  final_test_data = final_test %>% select(r, any_of(selected_fields))
+  if(!is.null(test))
+  {
+    test_data = test %>% select(r, any_of(selected_fields))
+    final_test_data = final_test %>% select(r, any_of(selected_fields))
+  } else {
+    test_data = NULL
+    final_test_data = NULL
+  }
   
   print(paste('Fields that don\'t exist:', paste(setdiff(selected_fields, colnames(train)), collapse = ',')))
   
@@ -492,25 +408,35 @@ trim_data = function(train, test, final_test, r, raw_response_var, missing_pct, 
   return(list(training_data, test_data, final_test_data))
 }
 
-model_prep = function(data_to_prep, column_categories, numbers, response_var, current_season_column_category, historical_season_column_category, acceptable_predictive_power, num_winners)
+model_prep = function(data_to_prep, column_categories, train_mode, numbers, response_var, current_season_column_category, historical_season_column_category, acceptable_predictive_power, num_winners)
 {
-  
   data_to_prep = data_to_prep %>%
     mutate(across(where(is.numeric), ~ifelse(is.infinite(.x), NA, .x))) %>%
-    mutate(across(where(is.logical), ~as.factor(.x))) %>%
-    filter(!is.na(!!sym(response_var)))
+    mutate(across(where(is.logical), ~as.factor(.x)))
+  
+  if (train_mode)
+  {
+    data_to_prep = data_to_prep %>% filter(!is.na(!!sym(response_var)))
+  }
+
   
   if (any(!is.na(numbers)))
   {
     response_var_list = paste0(response_var, '_', gsub('-', 'minus', numbers))
-    data_to_prep = create_data_with_response_variables(data_to_prep, numbers, response_var = response_var)
+    if(response_var %in% colnames(data_to_prep)) #historical data
+    {
+      data_to_prep = create_data_with_response_variables(data_to_prep, numbers, response_var = response_var)
+    }
   } else {
     response_var_list = response_var
-    if(max(as.numeric(data_to_prep[[response_var]])) == 2)
+    if(any(!is.na(data_to_prep[[response_var]])))
     {
-      data_to_prep[[response_var]] = as.factor(as.numeric(data_to_prep[[response_var]])-1)
-    } else {
-      data_to_prep[[response_var]] = as.factor(as.numeric(data_to_prep[[response_var]]))
+      if(max(as.numeric(data_to_prep[[response_var]]),na.rm=T) == 2)
+      {
+        data_to_prep[[response_var]] = as.factor(as.numeric(data_to_prep[[response_var]])-1)
+      } else {
+        data_to_prep[[response_var]] = as.factor(as.numeric(data_to_prep[[response_var]]))
+      }
     }
   }
   
@@ -559,36 +485,57 @@ model_prep = function(data_to_prep, column_categories, numbers, response_var, cu
   column_categories$game_info = c(column_categories$game_info, 'EarlySeason', 'MidSeason', 'LateSeason', 'Playoffs')
   
   set.seed(1)
-  train = data_to_prep %>% filter(season %in% c(2022,2023))
-  test = data_to_prep %>% filter(season == 2024)
-  final_test = data_to_prep %>% filter(season == 2025)
   
-  column_categories_df = categorize_stats_fields(column_categories, column_category_current = current_season_column_category,
-                                                 past_season_column_category = historical_season_column_category) %>% distinct() %>% select(-any_of(paste0(response_var, c('_lag1','_lag2','_lag3'))))
-  
-  #information value:
-  
-  exclude_from_model = c(column_categories$identifiers, 'jersey_number', 'latest_team', 'draft_team', 'game_id', 'opponent_team', 'gameday', 'team_qb_id', 'team_coach', "opp_offense_coach", "opp_offense_qb_id")
-  exclude_from_information_value = c(exclude_from_model, 'coach_previous_weeks_with_team', "opp_coach_previous_weeks_with_team", column_categories$mask, column_categories$injuries, column_categories$usage_and_depth, column_categories$past_season_usage_and_depth, column_categories$playoff_clinching, column_categories$blue_chip, column_categories$matchup_history, column_categories$team_matchup_data, 'home_stadium', 'long_travel', 'opp_long_travel', 'div_game', 'long_week', 'opp_long_week', 'opp_long_week', 'opp_short_week', 'team_last_week_ot_road', 'game_on_birthday', 'neutral_field', 'week')
-  
-  list_training_data = list()
-  list_test_data = list()
-  list_final_test_data = list()
-  
-  for(r in response_var_list)
+  if (train_mode)
   {
-    print(r)
-    this_response_df = train %>% select(-any_of(setdiff(colnames(train)[which(str_detect(colnames(train), paste0(gsub('_[0-9]+','',r), '_[0-9]+')))], r)))
-    this_response_df_test = test %>% select(-any_of(setdiff(colnames(test)[which(str_detect(colnames(test), paste0(gsub('_[0-9]+','',r), '_[0-9]+')))],r)))
-    this_response_df_final_test = final_test %>% select(-any_of(setdiff(colnames(final_test)[which(str_detect(colnames(final_test), paste0(gsub('_[0-9]+','',r), '_[0-9]+')))],r)))
-    res = trim_data(train = this_response_df, test = this_response_df_test, final_test = this_response_df_final_test, r = r, raw_response_var = response_var, missing_pct = 0.5,
-                    exclude_from_information_value, exclude_from_model, response_var_list, this_or_that,
-                    column_categories, column_categories_df, acceptable_predictive_power = acceptable_predictive_power, num_winners = num_winners)
-    list_training_data[[r]] = res[[1]]
-    list_test_data[[r]] = res[[2]]
-    list_final_test_data[[r]] = res[[3]]
+    train = data_to_prep %>% filter(season %in% c(2022,2023))
+    test = data_to_prep %>% filter(season == 2024)
+    final_test = data_to_prep %>% filter(season == 2025)
+  
+    column_categories_df = categorize_stats_fields(column_categories, column_category_current = current_season_column_category,
+                                                   past_season_column_category = historical_season_column_category) %>% distinct() %>% select(-any_of(paste0(response_var, c('_lag1','_lag2','_lag3'))))
+    
+    #information value:
+    
+    exclude_from_model = c(column_categories$identifiers, 'jersey_number', 'latest_team', 'draft_team', 'game_id', 'opponent_team', 'gameday', 'team_qb_id', 'team_coach', "opp_offense_coach", "opp_offense_qb_id")
+    exclude_from_information_value = c(exclude_from_model, 'coach_previous_weeks_with_team', "opp_coach_previous_weeks_with_team", column_categories$mask, column_categories$injuries, column_categories$usage_and_depth, column_categories$past_season_usage_and_depth, column_categories$playoff_clinching, column_categories$blue_chip, column_categories$matchup_history, column_categories$team_matchup_data, 'home_stadium', 'long_travel', 'opp_long_travel', 'div_game', 'long_week', 'opp_long_week', 'opp_long_week', 'opp_short_week', 'team_last_week_ot_road', 'game_on_birthday', 'neutral_field', 'week')
+    
+    list_training_data = list()
+    list_test_data = list()
+    list_final_test_data = list()
+  
+    for(r in response_var_list)
+    {
+      print(r)
+      this_response_df = train %>% select(-any_of(setdiff(colnames(train)[which(str_detect(colnames(train), paste0(gsub('_[0-9]+','',r), '_[0-9]+')))], r)))
+      this_response_df_test = test %>% select(-any_of(setdiff(colnames(test)[which(str_detect(colnames(test), paste0(gsub('_[0-9]+','',r), '_[0-9]+')))],r)))
+      this_response_df_final_test = final_test %>% select(-any_of(setdiff(colnames(final_test)[which(str_detect(colnames(final_test), paste0(gsub('_[0-9]+','',r), '_[0-9]+')))],r)))
+      res = trim_data(train = this_response_df, test = this_response_df_test, final_test = this_response_df_final_test, r = r, raw_response_var = response_var, missing_pct = 0.5,
+                      exclude_from_information_value, exclude_from_model, response_var_list, this_or_that,
+                      column_categories, column_categories_df, acceptable_predictive_power = acceptable_predictive_power, num_winners = num_winners)
+      list_training_data[[r]] = res[[1]]
+      list_test_data[[r]] = res[[2]]
+      list_final_test_data[[r]] = res[[3]]
+    }
+    return(list(list_training_data, list_test_data, list_final_test_data, column_categories))
+  } else {
+    list_data = list()
+    for(r in response_var_list)
+    {
+      print(r)
+      this_response_var_data = data_to_prep %>% select(-any_of(setdiff(colnames(data_to_prep)[which(str_detect(colnames(data_to_prep), paste0(gsub('_[0-9]+','',r), '_[0-9]+')))], r)))
+      previously_trained_model_data = read_parquet(paste0('model/ml_ready_data/train/',r,'.parquet'))
+      if (r %in% colnames(this_response_var_data))
+      {
+        list_data[[r]] = this_response_var_data %>% select(all_of(colnames(previously_trained_model_data)))
+      } else { #predict mode
+        list_data[[r]] = this_response_var_data %>% select(all_of(setdiff(colnames(previously_trained_model_data), r)))
+      }
+      
+    }
+    return(list_data)
   }
-  return(list(list_training_data, list_test_data, list_final_test_data, column_categories))
+  
 }
 
 #Turn IV results into dummy variables:
