@@ -24,7 +24,8 @@ get_team_data = function(min_year, max_year, schedules_df, team_lookup_df, wk = 
    rename(opponent_team = opponent)
   
   
-  orig_teamgl = load_team_stats(seasons = min_year:max_year) %>% select(season, week, team, 
+ 
+  orig_teamgl = load_team_stats(seasons = min_year:(ifelse(!is.null(wk)&&wk==1, (max_year-1), max_year))) %>% select(season, week, team, 
                                                                    completions, attempts, passing_yards, passing_tds, passing_interceptions, sacks_suffered, sack_yards_lost, sack_fumbles, sack_fumbles_lost, passing_air_yards, passing_yards_after_catch, passing_first_downs, passing_2pt_conversions, 
                                                                    carries, rushing_yards, rushing_tds, rushing_fumbles, rushing_fumbles_lost, rushing_first_downs, rushing_2pt_conversions,
                                                                    receiving_fumbles, receiving_fumbles_lost,
@@ -63,7 +64,7 @@ get_team_data = function(min_year, max_year, schedules_df, team_lookup_df, wk = 
     teamgl = teamgl %>% bind_rows(upcoming_week_schedule)
   }
   
-  play_details = load_pbp((max(min_year,2022)):max_year)  %>% filter(!is.na(posteam))
+  play_details = load_pbp((max(min_year,2022)):(ifelse(!is.null(wk)&&wk==1,(max_year-1),max_year)))  %>% filter(!is.na(posteam))
   
   if(test_mode)
   {
@@ -101,7 +102,7 @@ get_team_data = function(min_year, max_year, schedules_df, team_lookup_df, wk = 
   
   
   aggregated_play_data = play_details %>%
-    left_join(load_ftn_charting(max(min_year,2022):max_year) %>% select(-season, -week, -ftn_play_id), join_by( 'play_id'== 'nflverse_play_id', 'game_id' == 'nflverse_game_id')) %>%
+    left_join(load_ftn_charting(max(min_year,2022):(ifelse(!is.null(wk)&&wk==1,(max_year-1),max_year))) %>% select(-season, -week, -ftn_play_id), join_by( 'play_id'== 'nflverse_play_id', 'game_id' == 'nflverse_game_id')) %>%
     group_by(game_id, posteam) %>%
     summarise(team_qb_sneaks = sum(is_qb_sneak, na.rm = TRUE),
               team_catchable_balls = sum(is_catchable_ball, na.rm = TRUE),
@@ -341,7 +342,7 @@ calculate_team_seasonal_historical_stats = function(team_data, opp_data, team_ca
               team_column_categories))
 }
 
-pull_all_team_stats = function(min_year, max_year, wk = NULL, test_mode = FALSE)
+pull_all_team_stats = function(min_year, max_year, wk = NULL, test_mode = FALSE, schedules_raw)
 {
   if (is.null(wk))
   {
@@ -356,6 +357,18 @@ pull_all_team_stats = function(min_year, max_year, wk = NULL, test_mode = FALSE)
   opp_data = team_opp_data[[2]]
   team_redzone_drives = team_opp_data[[3]]
   cleaned_schedules_df = team_opp_data[[4]]
+  
+  # write.csv(team_data %>% mutate(updated_at = Sys.time()), 'team_data.csv', row.names=FALSE)
+  # write.csv(opp_data %>% mutate(updated_at = Sys.time()), 'opp_data.csv', row.names = FALSE)
+  
+  #this is just for being able to read from shiny app:
+  if(mode == 'predict')
+  {
+    upsert_to_supabase('MainData', 'TeamStats', team_data %>% mutate(updated_at = Sys.time()),
+                       c('team', 'season', 'week')) 
+    upsert_to_supabase('MainData', 'OppStats', opp_data %>% mutate(updated_at = Sys.time()),
+                       c('opponent_team', 'season', 'week')) 
+  }
   
   #don't forget to remove the lines filtering on week 5 2025 when testing is done
   
