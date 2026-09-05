@@ -32,6 +32,8 @@ For each available bet, it can display information such as:
 - opponent information
 - game time and location
 
+<img src = 'readme_screenshots/BetInfoPopup.png' width="450"/>
+
 Supported markets include both player and team bets, including:
 
 - passing yards
@@ -56,6 +58,8 @@ Users can control portfolio constraints including:
 - minimum individual stake
 - maximum portfolio standard deviation
 
+<img src = 'readme_screenshots/PortfolioPreferences.png' width="450"/>
+
 The available bets are sent to the project's GCP API, which performs the portfolio optimization and returns:
 
 - selected bets
@@ -63,6 +67,8 @@ The available bets are sent to the project's GCP API, which performs the portfol
 - expected portfolio return
 - portfolio variance
 - portfolio standard deviation
+
+<img src = 'readme_screenshots/PortfolioResults.png' width="450"/>
 
 This allows the application to account for the combined risk and correlations between bets, and return of a group of bets rather than simply ranking bets independently.
 
@@ -86,6 +92,8 @@ Stored information includes:
 
 After games are completed, results can be recorded and used for historical performance analysis.
 
+<img src = 'readme_screenshots/LogBet.png' width="450"/>
+
 ### Betting Performance
 
 The application provides summaries of historical betting results, including breakdowns by:
@@ -98,6 +106,10 @@ The application provides summaries of historical betting results, including brea
 
 These summaries are used to evaluate how the system and bettors have performed over time.
 
+<img src = 'readme_screenshots/ReturnsPlots.png' width="450"/>
+
+*Fake testing numbers*.
+
 ### Weekly Bet Cheat Sheet
 
 The application can generate an HTML cheat sheet for the upcoming NFL slate using `BetWeeklySummary.Rmd`, to help bettors keep track of which players and teams to root for as they watch the games!
@@ -106,9 +118,13 @@ The report organizes bets by game window (Sunday early window, Sunday Late Windo
 
 It also supports survivor-pool selections, allowing bets and survivor picks to be viewed together in game order.
 
+<img src = 'readme_screenshots/WeeklyCheatSheet.png' width="450"/>
+
 ### Survivor Pool
 
 The application includes a small dashboard to help players who are playing Survivor Pool (unrelated to the models). It shows the top teams ordered by how many DraftKings points they are favored by, and displays game and team information, along with a list of the team's upcoming opponents for the rest of the season.
+
+<img src = 'readme_screenshots/SurvivorPool.png' width="450"/>
 
 ## Front-End Architecture
 
