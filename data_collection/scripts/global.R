@@ -1,11 +1,7 @@
 library(slider)
 library(dplyr)
-
 library(nflreadr)
 library(jsonlite)
-
-min_year = 2020
-max_year = 2025
 
 
 compute_slider_cumulatives = function(df, cols_to_include, cumulative_only) {
@@ -214,27 +210,32 @@ remove_uninformative_stats = function(df, column_list, missing_threshold)
 
 
 #data:
-
-schedules_raw = load_schedules(min_year:max_year) %>% clean_homeaway() 
+get_schedules = function(min_year, max_year)
+{
+  return(load_schedules(min_year:max_year) %>% clean_homeaway())
+}
 
 #fix the case for the week after a bye week
-week_end_dates_by_team = schedules_raw %>% group_by(season, week, team) %>% summarise(week_end = max(paste(gameday, gametime)), .groups = 'drop')
-previous_game_info = week_end_dates_by_team %>% 
-  ungroup() %>% 
-  group_by(season, team) %>% 
-  arrange(week) %>%
-  mutate(previous_game_end = lag(week_end)) %>% 
-  ungroup() %>% select(-week_end)
-
-week_dates = week_end_dates_by_team %>% 
-  left_join(previous_game_info, join_by('season', 'team', 'week')) %>%
-  mutate(
-    week_start = case_when(
-      is.na(previous_game_end) ~ as.POSIXct(paste0(season, '-07-01 00:00:00')),
-      TRUE ~ as.POSIXct(previous_game_end) + 1
-    ),
-    week_end = as.POSIXct(week_end)
-  ) %>% select(-previous_game_end)
+get_week_end_dates = function(schedules_raw)
+{
+  week_end_dates_by_team = schedules_raw %>% group_by(season, week, team) %>% summarise(week_end = max(paste(gameday, gametime)), .groups = 'drop')
+  previous_game_info = week_end_dates_by_team %>% 
+    ungroup() %>% 
+    group_by(season, team) %>% 
+    arrange(week) %>%
+    mutate(previous_game_end = lag(week_end)) %>% 
+    ungroup() %>% select(-week_end)
+  
+  week_dates = week_end_dates_by_team %>% 
+    left_join(previous_game_info, join_by('season', 'team', 'week')) %>%
+    mutate(
+      week_start = case_when(
+        is.na(previous_game_end) ~ as.POSIXct(paste0(season, '-07-01 00:00:00')),
+        TRUE ~ as.POSIXct(previous_game_end) + 1
+      ),
+      week_end = as.POSIXct(week_end)
+    ) %>% select(-previous_game_end)
+}
 
 team_lookup_table = get_supabase_data(schema = 'MainData', table_name = 'TeamLookup')
 
