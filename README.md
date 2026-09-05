@@ -108,3 +108,11 @@ The portfolio optimizer therefore considers both expected return and risk. Using
 This means the system is not simply selecting the bets with the highest projected EV. It is selecting a combination of positive-EV bets whose collective risk and correlation structure produce an attractive overall portfolio.
 
 **The goal is not to predict sports perfectly; it is to identify situations where the model estimates the odds more accurately than the market and repeatedly invest where that difference creates positive expected value.**
+
+## Model appears to be better calibrated than the Market
+
+When comparing to the actual hit rate of bets, the model appears to be better calibrated than the market's implied probability, at most odds ranges.
+
+![alt text](image.png)
+
+However, this does not necessarily translate to good bet recommendations, as this calibration only matters for high-EV bets that will actually be recommended. However, having a well-calibrated model is necessary to take that step. As the system improves, it will be geared towards improving calibration on the higher EV bets.
