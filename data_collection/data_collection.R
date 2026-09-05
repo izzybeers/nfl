@@ -18,43 +18,37 @@ source('data_collection/scripts/global.R')
 source('data_collection/scripts/player_data.R')
 source('data_collection/scripts/team_game_data.R')
 source('data_collection/scripts/get_injuries.R')
-source('data_collection/scripts/get_playoff_clinching_data_script.R')
+source('data_collection/scripts/get_playoff_clinching_data.R')
 #source('data_collection/scripts/nlp.R')
 source('data_collection/scripts/blue_chip_analysis.R')
 
-#one of predict (data for upcoming week), train (tune hyperparameters for model), full_fit (just run model on full dataset) 
-mode = 'predict'
-midweek_update = FALSE #updates throughout the week for weather and injury status
-wk = 1
-min_year = 2020
-max_year = 2025
-num_iv_winners = 10
-test_mode = TRUE
 
-if (mode != 'predict')
+data_collection = function(mode, min_year, max_year, wk, num_iv_winners = 10, test_mode)
 {
-  wk = NULL
-  midweek_update = FALSE
-}
-
-if (!is.null(wk))
-{
-  mode = 'predict'
-}
-
-if (mode == 'predict' & is.null(wk))
-{
-  stop("wk cannot be null when mode is predict")
-}
-
-options(dplyr.summarise.inform = FALSE)
-
-t1 = Sys.time()
-
-print('Pulling team data...')
-if (midweek_update == FALSE)
-{
-  team_data_all =  pull_all_team_stats(min_year, max_year, wk = wk, test_mode = test_mode)
+  schedules_raw = get_schedules(min_year, max_year)
+  if (mode != 'predict')
+  {
+    wk = NULL
+  }
+  
+  if (!is.null(wk))
+  {
+    mode = 'predict'
+  }
+  
+  if (mode == 'predict' & is.null(wk))
+  {
+    stop("wk cannot be null when mode is predict")
+  }
+  
+  options(dplyr.summarise.inform = FALSE)
+  
+  t1 = Sys.time()
+  
+  print('Pulling team data...')
+  
+  #in week 2, check on the writing to supabase part:
+  team_data_all =  pull_all_team_stats(min_year, max_year, wk = wk, test_mode = test_mode, schedules_raw = schedules_raw)
   team_data_combined = team_data_all[[1]]
   opp_data_combined= team_data_all[[2]]
   team_column_categories = team_data_all[[3]]
@@ -62,12 +56,10 @@ if (midweek_update == FALSE)
   
   print('Pulling player data...')
   
-  player_data_all = pull_all_player_stats(min_year, max_year, team_redzone_drives = team_redzone_drives, test_mode = test_mode, wk = wk)
+  player_data_all = pull_all_player_stats(min_year, max_year, team_redzone_drives = team_redzone_drives, test_mode = test_mode, wk = wk, schedules_raw = schedules_raw)
   player_data_combined = player_data_all[[1]]
   defense_data_combined = player_data_all[[2]]
   player_column_categories = player_data_all[[3]]
-  # rm(player_data_all)
-  gc()
   
   column_categories = c(team_column_categories, player_column_categories)
 
@@ -315,7 +307,7 @@ if (midweek_update == FALSE)
     column_categories[['playoff_clinching']] = setdiff(colnames(playoff_clinching_data), c('Season','Week','Team'))
   } else if (!is.null(wk)) {
     playoff_clinching_data = get_playoff_clinching_data(max_year, max_year, wk = wk, predict_mode = TRUE)
-    if (!(test_mode))
+    if (!(test_mode) & sum(!is.na(playoff_clinching_data$Div_Ranking)) > 0)
     {
       write_to_supabase('MainData', 'PlayoffClinching', playoff_clinching_data %>% filter(!is.na(Team)))
     }
@@ -324,7 +316,19 @@ if (midweek_update == FALSE)
   print('Pulling injuries data and applying to blue chip analysis...')
   if (mode == 'predict')
   {
-    injuries = get_injuries_data(mode == 'predict', max_year, max_year, wk = wk, testmode = test_mode)
+    injuries = tryCatch(
+      get_injuries_data(mode == 'predict', max_year, max_year, wk = wk, testmode = test_mode),
+      error = function(e) tibble(
+        season = numeric(),
+        week = numeric(),
+        gsis_id = character(),
+        team = character(),
+        less_practice = logical(),
+        illness = logical(),
+        out_not_injury_related = logical(),
+        out = logical()
+      )
+    )
   } else {
     injuries = get_injuries_data(mode == 'predict', min_year, max_year, testmode = test_mode)
   }
@@ -338,6 +342,14 @@ if (midweek_update == FALSE)
   }
   
   print('Joining tables together...')
+  
+  if (mode == 'predict')
+  {
+    starting_qbs = player_data_combined %>% filter(position == 'QB', depth_rank == 1, week == wk, season == max_year) %>% select(gsis_id, season, week, team) %>% rename(team_qb_id_2 = gsis_id) %>% distinct()
+    team_data_combined = team_data_combined %>% left_join(starting_qbs, join_by('season','week','team')) %>%
+      mutate(team_qb_id = coalesce(team_qb_id, team_qb_id_2)) %>% select(-team_qb_id_2)
+  }
+  
   
   model_data = player_data_combined %>%
     inner_join(team_data_combined %>% select(-game_id), join_by('season', 'week', 'team')) %>%
@@ -384,7 +396,7 @@ if (midweek_update == FALSE)
                   inner_join(team_lookup_table %>% select(NFLReadr_Team_Abbr, Used_To_Cold, Used_To_Hot, Coast), join_by('opponent_team' == 'NFLReadr_Team_Abbr')) %>%
                   mutate(familiar_temperature = !((temp < 40 & !Used_To_Cold.x) | (temp > 80 & !Used_To_Hot.x)) | is.na(temp),
                          opp_familiar_temperature = !((temp < 40 & !Used_To_Cold.y) | (temp > 80 & !Used_To_Hot.y)) | is.na(temp)) %>%
-                  select(-contains('Used_To'))
+                  select(-matches('Used_To|Coast'))
       )
   }
 
@@ -818,7 +830,7 @@ if (midweek_update == FALSE)
                                                                                                      inner_join(team_lookup_table %>% select(NFLReadr_Team_Abbr, Used_To_Cold, Used_To_Hot, Coast), join_by('opponent_team' == 'NFLReadr_Team_Abbr')) %>%
                                                                                                      mutate(familiar_temperature = !((temp < 40 & !Used_To_Cold.x) | (temp > 80 & !Used_To_Hot.x)) | is.na(temp),
                                                                                                             opp_familiar_temperature = !((temp < 40 & !Used_To_Cold.y) | (temp > 80 & !Used_To_Hot.y)) | is.na(temp)) %>%
-                                                                                                     select(-contains('Used_To')))
+                                                                                                     select(-matches('Used_To|Coast')))
   }
   
   
@@ -850,345 +862,349 @@ if (midweek_update == FALSE)
     moneyline_model_data = moneyline_model_data %>% filter(season == max_year & week == wk)
     spread_model_data = spread_model_data %>% filter(season == max_year & week == wk)
     
-    if (test_mode)
-    {
-      dir_name = paste0("data_collection/testing_checkpoint_data/", max_year,'week',wk,'/')
-      dir.create(dir_name, recursive = TRUE, showWarnings = FALSE)
-      saveRDS(blue_chip_analysis_df, paste0(dir_name, "/testmode_blue_chip_analysis_df_checkpoint.rds"))
-    } else {
-      dir_name = paste0("data_collection/checkpoint_data/", max_year,'week',wk,'/')
-      dir.create(dir_name, recursive = TRUE, showWarnings = FALSE)
-    }
-    saveRDS(passing_model_data, paste0(dir_name, '/passing_model_data_checkpoint.rds'))
-    saveRDS(rushing_model_data, paste0(dir_name, '/rushing_model_data_checkpoint.rds'))
-    saveRDS(receiving_model_data, paste0(dir_name, '/receiving_model_data_checkpoint.rds'))
-    saveRDS(touchdown_model_data, paste0(dir_name, '/touchdown_model_data_checkpoint.rds'))
-    saveRDS(rushing_receiving_model_data, paste0(dir_name, '/rushing_receiving_model_data_checkpoint.rds'))
-    saveRDS(reception_model_data, paste0(dir_name, '/reception_model_data_checkpoint.rds'))
-    saveRDS(spread_model_data, paste0(dir_name, '/spread_model_data_checkpoint.rds'))
-    saveRDS(moneyline_model_data, paste0(dir_name, '/moneyline_model_data_checkpoint.rds'))
+      # if (test_mode)
+      # {
+      #   dir_name = paste0("data_collection/testing_checkpoint_data/", max_year,'week',wk,'/')
+      #   dir.create(dir_name, recursive = TRUE, showWarnings = FALSE)
+      #   saveRDS(blue_chip_analysis_df, paste0(dir_name, "/testmode_blue_chip_analysis_df_checkpoint.rds"))
+      # } else {
+      #   dir_name = paste0("data_collection/checkpoint_data/", max_year,'week',wk,'/')
+      #   dir.create(dir_name, recursive = TRUE, showWarnings = FALSE)
+      # }
+      # saveRDS(passing_model_data, paste0(dir_name, '/passing_model_data_checkpoint.rds'))
+      # saveRDS(rushing_model_data, paste0(dir_name, '/rushing_model_data_checkpoint.rds'))
+      # saveRDS(receiving_model_data, paste0(dir_name, '/receiving_model_data_checkpoint.rds'))
+      # saveRDS(touchdown_model_data, paste0(dir_name, '/touchdown_model_data_checkpoint.rds'))
+      # saveRDS(rushing_receiving_model_data, paste0(dir_name, '/rushing_receiving_model_data_checkpoint.rds'))
+      # saveRDS(reception_model_data, paste0(dir_name, '/reception_model_data_checkpoint.rds'))
+      # saveRDS(spread_model_data, paste0(dir_name, '/spread_model_data_checkpoint.rds'))
+      # saveRDS(moneyline_model_data, paste0(dir_name, '/moneyline_model_data_checkpoint.rds'))
   }
-}
-  
-#things that need to be updated periodically throughout the week (injuries and weather forecast)
-if (midweek_update)
-{
-    if (test_mode)
-    {
-      dir_name = paste0("data_collection/testing_checkpoint_data/", max_year,'week',wk,'/')
-    } else {
-      dir_name = paste0("data_collection/checkpoint_data/", max_year,'week',wk,'/')
-    }
-    passing_model_data = readRDS(paste0(dir_name, '/passing_model_data_checkpoint.rds'))
-    rushing_model_data = readRDS(paste0(dir_name, '/rushing_model_data_checkpoint.rds'))
-    receiving_model_data = readRDS(paste0(dir_name, '/receiving_model_data_checkpoint.rds'))
-    touchdown_model_data = readRDS(paste0(dir_name, '/touchdown_model_data_checkpoint.rds'))
-    rushing_receiving_model_data = readRDS(paste0(dir_name, '/rushing_receiving_model_data_checkpoint.rds'))
-    reception_model_data = readRDS(paste0(dir_name, '/reception_model_data_checkpoint.rds'))
-    spread_model_data = readRDS(paste0(dir_name, '/spread_model_data_checkpoint.rds'))
-    moneyline_model_data = readRDS(paste0(dir_name, '/moneyline_model_data_checkpoint.rds'))
-    
-    print('Pulling injuries data and applying to blue chip analysis...')
-    injuries = get_injuries_data(mode == 'predict', max_year, max_year, wk = wk, testmode = test_mode)
-    if (!test_mode)
-    {
-      blue_chip_analysis_df = get_supabase_data(schema = 'MainData', table_name = 'BlueChip', additional_sql = list(season = paste0('eq.', max_year),
-                                                                                                                    week = paste0('eq.', wk)))
-    } else {
-      blue_chip_analysis_df = readRDS(paste0(dir_name, "testmode_blue_chip_analysis_df_checkpoint.rds"))
-    }
-    
-    blue_chip_players_out = combine_injuries_with_blue_chip(blue_chip_analysis_df, injuries)
-    
-    #player models
-    
-    update_data = function(data, type)
-    {
-      rows_before_change = nrow(data)
-      cols_before_change = ncol(data)
-      if (type == 'player')
-      {
-        cols_to_update = c("less_practice", "illness", "out_not_injury_related", "out", colnames(data)[str_detect(colnames(data), 'blue_chip_out')])
-        data = data %>% select(-any_of(cols_to_update)) %>%
-          left_join(injuries %>% select(-team), join_by('gsis_id','season','week')) %>%
-          left_join(blue_chip_players_out, join_by('season','week','team')) %>% mutate(has_passing_blue_chip_out = ifelse(is.na(has_passing_blue_chip_out), FALSE, has_passing_blue_chip_out),
-                                                                                       has_rushing_blue_chip_out = ifelse(is.na(has_rushing_blue_chip_out), FALSE, has_rushing_blue_chip_out),
-                                                                                       has_receiving_blue_chip_out = ifelse(is.na(has_receiving_blue_chip_out), FALSE, has_receiving_blue_chip_out),
-                                                                                       has_pass_rushers_blue_chip_out = ifelse(is.na(has_pass_rushers_blue_chip_out), FALSE, has_pass_rushers_blue_chip_out),
-                                                                                       has_rush_tackles_blue_chip_out = ifelse(is.na(has_rush_tackles_blue_chip_out), FALSE, has_rush_tackles_blue_chip_out),
-                                                                                       has_secondary_blue_chip_out = ifelse(is.na(has_secondary_blue_chip_out), FALSE, has_secondary_blue_chip_out))  %>%
-          mutate(across(where(is.numeric), ~ ifelse(is.infinite(.x), NA, .x)),
-                 out = coalesce(out, FALSE),
-                 out_not_injury_related = coalesce(out_not_injury_related, FALSE),
-                 illness = coalesce(illness, FALSE),
-                 less_practice = coalesce(less_practice, FALSE),
-                 passing_blue_chip = coalesce(passing_blue_chip, FALSE),
-                 rushing_blue_chip = coalesce(rushing_blue_chip, FALSE),
-                 receiving_blue_chip = coalesce(receiving_blue_chip, FALSE),
-                 pass_rushers_blue_chip = coalesce(pass_rushers_blue_chip, FALSE),
-                 rush_tackles_blue_chip = coalesce(rush_tackles_blue_chip, FALSE),
-                 secondary_blue_chip = coalesce(secondary_blue_chip, FALSE))
-          
-        
-      } else if (type == 'team') {
-        cols_to_update = colnames(data)[str_detect(colnames(data), 'blue_chip')]
-        data = data %>% select(-any_of(cols_to_update)) %>%
-          left_join(blue_chip_players_out, join_by('season','week','team')) %>% mutate(has_passing_blue_chip_out = ifelse(is.na(has_passing_blue_chip_out), FALSE, has_passing_blue_chip_out),
-                                                                                       has_rushing_blue_chip_out = ifelse(is.na(has_rushing_blue_chip_out), FALSE, has_rushing_blue_chip_out),
-                                                                                       has_receiving_blue_chip_out = ifelse(is.na(has_receiving_blue_chip_out), FALSE, has_receiving_blue_chip_out),
-                                                                                       has_pass_rushers_blue_chip_out = ifelse(is.na(has_pass_rushers_blue_chip_out), FALSE, has_pass_rushers_blue_chip_out),
-                                                                                       has_rush_tackles_blue_chip_out = ifelse(is.na(has_rush_tackles_blue_chip_out), FALSE, has_rush_tackles_blue_chip_out),
-                                                                                       has_secondary_blue_chip_out = ifelse(is.na(has_secondary_blue_chip_out), FALSE, has_secondary_blue_chip_out)) %>%
-          left_join(blue_chip_players_out %>% mutate(opp_has_passing_blue_chip_out = ifelse(is.na(has_passing_blue_chip_out), FALSE, has_passing_blue_chip_out),
-                                                     opp_has_rushing_blue_chip_out = ifelse(is.na(has_rushing_blue_chip_out), FALSE, has_rushing_blue_chip_out),
-                                                     opp_has_receiving_blue_chip_out = ifelse(is.na(has_receiving_blue_chip_out), FALSE, has_receiving_blue_chip_out),
-                                                     opp_has_pass_rushers_blue_chip_out = ifelse(is.na(has_pass_rushers_blue_chip_out), FALSE, has_pass_rushers_blue_chip_out),
-                                                     opp_has_rush_tackles_blue_chip_out = ifelse(is.na(has_rush_tackles_blue_chip_out), FALSE, has_rush_tackles_blue_chip_out),
-                                                     opp_has_secondary_blue_chip_out = ifelse(is.na(has_secondary_blue_chip_out), FALSE, has_secondary_blue_chip_out)) %>%
-                      select(-has_passing_blue_chip_out, -has_rushing_blue_chip_out, -has_receiving_blue_chip_out, -has_pass_rushers_blue_chip_out, -has_rush_tackles_blue_chip_out, -has_secondary_blue_chip_out), join_by('season','week','opponent_team' == 'team')) %>%
-        mutate(across(contains('blue_chip_out'), ~ coalesce(.x, FALSE)))
-        
-        
-        
-      } else {
-        stop("type must be 'player' or 'team'")
-      }
-      if (test_mode)
-      {
-        data_with_weather = get_weather(data %>% select(-wind, -temp) %>% filter(season == max_year & week == wk) %>% mutate(actual_gameday = gameday, gameday = Sys.Date() + 1), team_lookup_table) %>%
-          select(-gameday) %>% rename('gameday' = 'actual_gameday')
-      } else{
-        data_with_weather = get_weather(data %>% select(-wind, -temp) %>% filter(season == max_year & week == wk), team_lookup_table)
-      }
-      
-      if((nrow(data_with_weather) != rows_before_change) | (ncol(data_with_weather) != cols_before_change))
-      {
-        stop(paste('Dimensions changed. Before:', rows_before_change, 'rows and', cols_before_change, 'columns. After:', nrow(data_with_weather), 'rows and', ncol(data_with_weather), 'columns.'))
-      }
-      return(data_with_weather %>%
-               inner_join(team_lookup_table %>% select(NFLReadr_Team_Abbr, Used_To_Cold, Used_To_Hot, Coast), join_by('team' == 'NFLReadr_Team_Abbr')) %>%
-               inner_join(team_lookup_table %>% select(NFLReadr_Team_Abbr, Used_To_Cold, Used_To_Hot, Coast), join_by('opponent_team' == 'NFLReadr_Team_Abbr')) %>%
-               mutate(familiar_temperature = !((temp < 40 & !Used_To_Cold.x) | (temp > 80 & !Used_To_Hot.x)) | is.na(temp),
-                      opp_familiar_temperature = !((temp < 40 & !Used_To_Cold.y) | (temp > 80 & !Used_To_Hot.y)) | is.na(temp)) %>%
-               select(-contains('Used_To')))
-    }
-    
-    passing_model_data = update_data(passing_model_data, 'player')
-    
-    rushing_model_data = update_data(rushing_model_data, 'player') %>%
-      filter(is.na(out) | !out) %>%
-      group_by(season, week, team) %>% mutate(total_active_true_talent_baseline_rushing = sum(true_talent_baseline_rushing, na.rm = TRUE)) %>%
-      mutate(adjusted_rush_share = true_talent_baseline_rushing/total_active_true_talent_baseline_rushing,
-             delta_adjusted_share_rushing = adjusted_rush_share - true_talent_baseline_rushing) %>%
-             select(-total_active_true_talent_baseline_rushing)
-    
-    receiving_model_data = update_data(receiving_model_data, 'player') %>%
-      filter(is.na(out) | !out) %>%
-      group_by(season, week, team) %>% mutate(total_active_true_talent_baseline_receiving = sum(true_talent_baseline_receiving, na.rm = TRUE)) %>%
-      mutate(adjusted_target_share = true_talent_baseline_receiving/total_active_true_talent_baseline_receiving,
-             delta_adjusted_share_receiving = adjusted_target_share - true_talent_baseline_receiving) %>%
-      select(-total_active_true_talent_baseline_receiving)
-    
-    touchdown_model_data = update_data(touchdown_model_data, 'player') %>%
-      filter(is.na(out) | !out) %>%
-      group_by(season, week, team) %>%
-      mutate(total_active_true_talent_baseline_rushing = sum(true_talent_baseline_rushing, na.rm = TRUE),
-             total_active_true_talent_baseline_receiving = sum(true_talent_baseline_receiving, na.rm = TRUE)) %>%
-      mutate(adjusted_target_share = true_talent_baseline_receiving/total_active_true_talent_baseline_receiving,
-             delta_adjusted_share_receiving = adjusted_target_share - true_talent_baseline_receiving,
-             adjusted_rush_share = true_talent_baseline_rushing/total_active_true_talent_baseline_rushing,
-             delta_adjusted_share_rushing = adjusted_rush_share - true_talent_baseline_rushing) %>%
-      select(-total_active_true_talent_baseline_rushing, -total_active_true_talent_baseline_receiving)
-    
-    rushing_receiving_model_data = update_data(rushing_receiving_model_data, 'player') %>%
-      filter(is.na(out) | !out) %>%
-      group_by(season, week, team) %>%
-      mutate(total_active_true_talent_baseline_rushing = sum(true_talent_baseline_rushing, na.rm = TRUE),
-             total_active_true_talent_baseline_receiving = sum(true_talent_baseline_receiving, na.rm = TRUE)) %>%
-      mutate(adjusted_target_share = true_talent_baseline_receiving/total_active_true_talent_baseline_receiving,
-             delta_adjusted_share_receiving = adjusted_target_share - true_talent_baseline_receiving,
-             adjusted_rush_share = true_talent_baseline_rushing/total_active_true_talent_baseline_rushing,
-             delta_adjusted_share_rushing = adjusted_rush_share - true_talent_baseline_rushing) %>%
-      select(-total_active_true_talent_baseline_rushing, -total_active_true_talent_baseline_receiving)
-    
-    reception_model_data = update_data(reception_model_data, 'player') %>%
-      filter(is.na(out) | !out) %>%
-      group_by(season, week, team) %>%
-      mutate(total_active_true_talent_baseline_receiving = sum(true_talent_baseline_receiving, na.rm = TRUE)) %>%
-      mutate(adjusted_target_share = true_talent_baseline_receiving/total_active_true_talent_baseline_receiving,
-             delta_adjusted_share_receiving = adjusted_target_share - true_talent_baseline_receiving) %>%
-      select(-total_active_true_talent_baseline_receiving)
-    
-    spread_model_data = update_data(spread_model_data, 'team')
-    moneyline_model_data = update_data(moneyline_model_data, 'team')
-    
-    saveRDS(passing_model_data, paste0(dir_name, '/passing_model_data_checkpoint.rds'))
-    saveRDS(rushing_model_data, paste0(dir_name, '/rushing_model_data_checkpoint.rds'))
-    saveRDS(receiving_model_data, paste0(dir_name, '/receiving_model_data_checkpoint.rds'))
-    saveRDS(touchdown_model_data, paste0(dir_name, '/touchdown_model_data_checkpoint.rds'))
-    saveRDS(rushing_receiving_model_data, paste0(dir_name, '/rushing_receiving_model_data_checkpoint.rds'))
-    saveRDS(reception_model_data, paste0(dir_name, '/reception_model_data_checkpoint.rds'))
-    saveRDS(spread_model_data, paste0(dir_name, '/spread_model_data_checkpoint.rds'))
-    saveRDS(moneyline_model_data, paste0(dir_name, '/moneyline_model_data_checkpoint.rds'))
-}
 
-passing_model_data = readRDS('data_collection/testing_checkpoint_data/2025week1/passing_model_data_checkpoint.rds')
-rushing_model_data = readRDS('data_collection/testing_checkpoint_data/2025week1/rushing_model_data_checkpoint.rds')
-receiving_model_data = readRDS('data_collection/testing_checkpoint_data/2025week1/receiving_model_data_checkpoint.rds')
-rushing_receiving_model_data = readRDS('data_collection/testing_checkpoint_data/2025week1/rushing_receiving_model_data_checkpoint.rds')
-touchdown_model_data = readRDS('data_collection/testing_checkpoint_data/2025week1/touchdown_model_data_checkpoint.rds')
-reception_model_data = readRDS('data_collection/testing_checkpoint_data/2025week1/reception_model_data_checkpoint.rds')
-spread_model_data = readRDS('data_collection/testing_checkpoint_data/2025week1/spread_model_data_checkpoint.rds')
-moneyline_model_data = readRDS('data_collection/testing_checkpoint_data/2025week1/moneyline_model_data_checkpoint.rds')
+    
+  #things that need to be updated periodically throughout the week (injuries and weather forecast)
+  # if (midweek_update)
+  # {
+  #     if (test_mode)
+  #     {
+  #       dir_name = paste0("data_collection/testing_checkpoint_data/", max_year,'week',wk,'/')
+  #     } else {
+  #       dir_name = paste0("data_collection/checkpoint_data/", max_year,'week',wk,'/')
+  #     }
+  #     passing_model_data = readRDS(paste0(dir_name, '/passing_model_data_checkpoint.rds'))
+  #     rushing_model_data = readRDS(paste0(dir_name, '/rushing_model_data_checkpoint.rds'))
+  #     receiving_model_data = readRDS(paste0(dir_name, '/receiving_model_data_checkpoint.rds'))
+  #     touchdown_model_data = readRDS(paste0(dir_name, '/touchdown_model_data_checkpoint.rds'))
+  #     rushing_receiving_model_data = readRDS(paste0(dir_name, '/rushing_receiving_model_data_checkpoint.rds'))
+  #     reception_model_data = readRDS(paste0(dir_name, '/reception_model_data_checkpoint.rds'))
+  #     spread_model_data = readRDS(paste0(dir_name, '/spread_model_data_checkpoint.rds'))
+  #     moneyline_model_data = readRDS(paste0(dir_name, '/moneyline_model_data_checkpoint.rds'))
+  #     
+  #     print('Pulling injuries data and applying to blue chip analysis...')
+  #     injuries = get_injuries_data(mode == 'predict', max_year, max_year, wk = wk, testmode = test_mode)
+  #     if (!test_mode)
+  #     {
+  #       blue_chip_analysis_df = get_supabase_data(schema = 'MainData', table_name = 'BlueChip', additional_sql = list(season = paste0('eq.', max_year),
+  #                                                                                                                     week = paste0('eq.', wk)))
+  #     } else {
+  #       blue_chip_analysis_df = readRDS(paste0(dir_name, "testmode_blue_chip_analysis_df_checkpoint.rds"))
+  #     }
+  #     
+  #     blue_chip_players_out = combine_injuries_with_blue_chip(blue_chip_analysis_df, injuries)
+  #     
+  #     #player models
+  #     
+  #     update_data = function(data, type)
+  #     {
+  #       rows_before_change = nrow(data)
+  #       cols_before_change = ncol(data)
+  #       if (type == 'player')
+  #       {
+  #         depth_charts = load_depth_charts(max_year:max_year) %>% group_by(gsis_id) %>% arrange(desc(dt)) %>% slice(1) %>% ungroup() %>% #get the latest depth chart info for a player in a week
+  #           select(gsis_id, team, pos_rank) %>% rename('new_depth_rank' = 'pos_rank')
+  #         
+  #         cols_to_update = c("less_practice", "illness", "out_not_injury_related", "out", colnames(data)[str_detect(colnames(data), 'blue_chip_out')], 'team', 'depth_rank')
+  #         data = data %>% select(-any_of(cols_to_update)) %>% 
+  #           left_join(depth_charts, join_by('gsis_id')) %>%
+  #           left_join(injuries %>% select(-team), join_by('gsis_id','season','week')) %>%
+  #           left_join(blue_chip_players_out, join_by('season','week','team')) %>% mutate(has_passing_blue_chip_out = ifelse(is.na(has_passing_blue_chip_out), FALSE, has_passing_blue_chip_out),
+  #                                                                                        has_rushing_blue_chip_out = ifelse(is.na(has_rushing_blue_chip_out), FALSE, has_rushing_blue_chip_out),
+  #                                                                                        has_receiving_blue_chip_out = ifelse(is.na(has_receiving_blue_chip_out), FALSE, has_receiving_blue_chip_out),
+  #                                                                                        has_pass_rushers_blue_chip_out = ifelse(is.na(has_pass_rushers_blue_chip_out), FALSE, has_pass_rushers_blue_chip_out),
+  #                                                                                        has_rush_tackles_blue_chip_out = ifelse(is.na(has_rush_tackles_blue_chip_out), FALSE, has_rush_tackles_blue_chip_out),
+  #                                                                                        has_secondary_blue_chip_out = ifelse(is.na(has_secondary_blue_chip_out), FALSE, has_secondary_blue_chip_out))  %>%
+  #           mutate(across(where(is.numeric), ~ ifelse(is.infinite(.x), NA, .x)),
+  #                  out = coalesce(out, FALSE),
+  #                  out_not_injury_related = coalesce(out_not_injury_related, FALSE),
+  #                  illness = coalesce(illness, FALSE),
+  #                  less_practice = coalesce(less_practice, FALSE),
+  #                  passing_blue_chip = coalesce(passing_blue_chip, FALSE),
+  #                  rushing_blue_chip = coalesce(rushing_blue_chip, FALSE),
+  #                  receiving_blue_chip = coalesce(receiving_blue_chip, FALSE),
+  #                  pass_rushers_blue_chip = coalesce(pass_rushers_blue_chip, FALSE),
+  #                  rush_tackles_blue_chip = coalesce(rush_tackles_blue_chip, FALSE),
+  #                  secondary_blue_chip = coalesce(secondary_blue_chip, FALSE))
+  #           
+  #         
+  #       } else if (type == 'team') {
+  #         cols_to_update = colnames(data)[str_detect(colnames(data), 'blue_chip')]
+  #         data = data %>% select(-any_of(cols_to_update)) %>%
+  #           left_join(blue_chip_players_out, join_by('season','week','team')) %>% mutate(has_passing_blue_chip_out = ifelse(is.na(has_passing_blue_chip_out), FALSE, has_passing_blue_chip_out),
+  #                                                                                        has_rushing_blue_chip_out = ifelse(is.na(has_rushing_blue_chip_out), FALSE, has_rushing_blue_chip_out),
+  #                                                                                        has_receiving_blue_chip_out = ifelse(is.na(has_receiving_blue_chip_out), FALSE, has_receiving_blue_chip_out),
+  #                                                                                        has_pass_rushers_blue_chip_out = ifelse(is.na(has_pass_rushers_blue_chip_out), FALSE, has_pass_rushers_blue_chip_out),
+  #                                                                                        has_rush_tackles_blue_chip_out = ifelse(is.na(has_rush_tackles_blue_chip_out), FALSE, has_rush_tackles_blue_chip_out),
+  #                                                                                        has_secondary_blue_chip_out = ifelse(is.na(has_secondary_blue_chip_out), FALSE, has_secondary_blue_chip_out)) %>%
+  #           left_join(blue_chip_players_out %>% mutate(opp_has_passing_blue_chip_out = ifelse(is.na(has_passing_blue_chip_out), FALSE, has_passing_blue_chip_out),
+  #                                                      opp_has_rushing_blue_chip_out = ifelse(is.na(has_rushing_blue_chip_out), FALSE, has_rushing_blue_chip_out),
+  #                                                      opp_has_receiving_blue_chip_out = ifelse(is.na(has_receiving_blue_chip_out), FALSE, has_receiving_blue_chip_out),
+  #                                                      opp_has_pass_rushers_blue_chip_out = ifelse(is.na(has_pass_rushers_blue_chip_out), FALSE, has_pass_rushers_blue_chip_out),
+  #                                                      opp_has_rush_tackles_blue_chip_out = ifelse(is.na(has_rush_tackles_blue_chip_out), FALSE, has_rush_tackles_blue_chip_out),
+  #                                                      opp_has_secondary_blue_chip_out = ifelse(is.na(has_secondary_blue_chip_out), FALSE, has_secondary_blue_chip_out)) %>%
+  #                       select(-has_passing_blue_chip_out, -has_rushing_blue_chip_out, -has_receiving_blue_chip_out, -has_pass_rushers_blue_chip_out, -has_rush_tackles_blue_chip_out, -has_secondary_blue_chip_out), join_by('season','week','opponent_team' == 'team')) %>%
+  #         mutate(across(contains('blue_chip_out'), ~ coalesce(.x, FALSE)))
+  #         
+  #         
+  #         
+  #       } else {
+  #         stop("type must be 'player' or 'team'")
+  #       }
+  #       if (test_mode)
+  #       {
+  #         data_with_weather = get_weather(data %>% select(-wind, -temp) %>% filter(season == max_year & week == wk) %>% mutate(actual_gameday = gameday, gameday = Sys.Date() + 1), team_lookup_table) %>%
+  #           select(-gameday) %>% rename('gameday' = 'actual_gameday')
+  #       } else{
+  #         data_with_weather = get_weather(data %>% select(-wind, -temp) %>% filter(season == max_year & week == wk), team_lookup_table)
+  #       }
+  #       
+  #       if((nrow(data_with_weather) != rows_before_change) | (ncol(data_with_weather) != cols_before_change))
+  #       {
+  #         stop(paste('Dimensions changed. Before:', rows_before_change, 'rows and', cols_before_change, 'columns. After:', nrow(data_with_weather), 'rows and', ncol(data_with_weather), 'columns.'))
+  #       }
+  #       return(data_with_weather %>%
+  #                inner_join(team_lookup_table %>% select(NFLReadr_Team_Abbr, Used_To_Cold, Used_To_Hot, Coast), join_by('team' == 'NFLReadr_Team_Abbr')) %>%
+  #                inner_join(team_lookup_table %>% select(NFLReadr_Team_Abbr, Used_To_Cold, Used_To_Hot, Coast), join_by('opponent_team' == 'NFLReadr_Team_Abbr')) %>%
+  #                mutate(familiar_temperature = !((temp < 40 & !Used_To_Cold.x) | (temp > 80 & !Used_To_Hot.x)) | is.na(temp),
+  #                       opp_familiar_temperature = !((temp < 40 & !Used_To_Cold.y) | (temp > 80 & !Used_To_Hot.y)) | is.na(temp)) %>%
+  #                select(-contains('Used_To')))
+  #     }
+  #     
+  #     passing_model_data = update_data(passing_model_data, 'player')
+  #     
+  #     rushing_model_data = update_data(rushing_model_data, 'player') %>%
+  #       filter(is.na(out) | !out) %>%
+  #       group_by(season, week, team) %>% mutate(total_active_true_talent_baseline_rushing = sum(true_talent_baseline_rushing, na.rm = TRUE)) %>%
+  #       mutate(adjusted_rush_share = true_talent_baseline_rushing/total_active_true_talent_baseline_rushing,
+  #              delta_adjusted_share_rushing = adjusted_rush_share - true_talent_baseline_rushing) %>%
+  #              select(-total_active_true_talent_baseline_rushing)
+  #     
+  #     receiving_model_data = update_data(receiving_model_data, 'player') %>%
+  #       filter(is.na(out) | !out) %>%
+  #       group_by(season, week, team) %>% mutate(total_active_true_talent_baseline_receiving = sum(true_talent_baseline_receiving, na.rm = TRUE)) %>%
+  #       mutate(adjusted_target_share = true_talent_baseline_receiving/total_active_true_talent_baseline_receiving,
+  #              delta_adjusted_share_receiving = adjusted_target_share - true_talent_baseline_receiving) %>%
+  #       select(-total_active_true_talent_baseline_receiving)
+  #     
+  #     touchdown_model_data = update_data(touchdown_model_data, 'player') %>%
+  #       filter(is.na(out) | !out) %>%
+  #       group_by(season, week, team) %>%
+  #       mutate(total_active_true_talent_baseline_rushing = sum(true_talent_baseline_rushing, na.rm = TRUE),
+  #              total_active_true_talent_baseline_receiving = sum(true_talent_baseline_receiving, na.rm = TRUE)) %>%
+  #       mutate(adjusted_target_share = true_talent_baseline_receiving/total_active_true_talent_baseline_receiving,
+  #              delta_adjusted_share_receiving = adjusted_target_share - true_talent_baseline_receiving,
+  #              adjusted_rush_share = true_talent_baseline_rushing/total_active_true_talent_baseline_rushing,
+  #              delta_adjusted_share_rushing = adjusted_rush_share - true_talent_baseline_rushing) %>%
+  #       select(-total_active_true_talent_baseline_rushing, -total_active_true_talent_baseline_receiving)
+  #     
+  #     rushing_receiving_model_data = update_data(rushing_receiving_model_data, 'player') %>%
+  #       filter(is.na(out) | !out) %>%
+  #       group_by(season, week, team) %>%
+  #       mutate(total_active_true_talent_baseline_rushing = sum(true_talent_baseline_rushing, na.rm = TRUE),
+  #              total_active_true_talent_baseline_receiving = sum(true_talent_baseline_receiving, na.rm = TRUE)) %>%
+  #       mutate(adjusted_target_share = true_talent_baseline_receiving/total_active_true_talent_baseline_receiving,
+  #              delta_adjusted_share_receiving = adjusted_target_share - true_talent_baseline_receiving,
+  #              adjusted_rush_share = true_talent_baseline_rushing/total_active_true_talent_baseline_rushing,
+  #              delta_adjusted_share_rushing = adjusted_rush_share - true_talent_baseline_rushing) %>%
+  #       select(-total_active_true_talent_baseline_rushing, -total_active_true_talent_baseline_receiving)
+  #     
+  #     reception_model_data = update_data(reception_model_data, 'player') %>%
+  #       filter(is.na(out) | !out) %>%
+  #       group_by(season, week, team) %>%
+  #       mutate(total_active_true_talent_baseline_receiving = sum(true_talent_baseline_receiving, na.rm = TRUE)) %>%
+  #       mutate(adjusted_target_share = true_talent_baseline_receiving/total_active_true_talent_baseline_receiving,
+  #              delta_adjusted_share_receiving = adjusted_target_share - true_talent_baseline_receiving) %>%
+  #       select(-total_active_true_talent_baseline_receiving)
+  #     
+  #     spread_model_data = update_data(spread_model_data, 'team')
+  #     moneyline_model_data = update_data(moneyline_model_data, 'team')
+  #     
+  #     saveRDS(passing_model_data, paste0(dir_name, '/passing_model_data_checkpoint.rds'))
+  #     saveRDS(rushing_model_data, paste0(dir_name, '/rushing_model_data_checkpoint.rds'))
+  #     saveRDS(receiving_model_data, paste0(dir_name, '/receiving_model_data_checkpoint.rds'))
+  #     saveRDS(touchdown_model_data, paste0(dir_name, '/touchdown_model_data_checkpoint.rds'))
+  #     saveRDS(rushing_receiving_model_data, paste0(dir_name, '/rushing_receiving_model_data_checkpoint.rds'))
+  #     saveRDS(reception_model_data, paste0(dir_name, '/reception_model_data_checkpoint.rds'))
+  #     saveRDS(spread_model_data, paste0(dir_name, '/spread_model_data_checkpoint.rds'))
+  #     saveRDS(moneyline_model_data, paste0(dir_name, '/moneyline_model_data_checkpoint.rds'))
+  # }
+
+  # passing_model_data = readRDS(paste0('data_collection/checkpoint_data/',max_year,'week',wk,'/passing_model_data_checkpoint.rds'))
+  # rushing_model_data = readRDS(paste0('data_collection/checkpoint_data/',max_year,'week',wk,'/rushing_model_data_checkpoint.rds'))
+  # receiving_model_data = readRDS(paste0('data_collection/checkpoint_data/',max_year,'week',wk,'/receiving_model_data_checkpoint.rds'))
+  # rushing_receiving_model_data = readRDS(paste0('data_collection/checkpoint_data/',max_year,'week',wk,'/rushing_receiving_model_data_checkpoint.rds'))
+  # touchdown_model_data = readRDS(paste0('data_collection/checkpoint_data/',max_year,'week',wk,'/touchdown_model_data_checkpoint.rds'))
+  # reception_model_data = readRDS(paste0('data_collection/checkpoint_data/',max_year,'week',wk,'/reception_model_data_checkpoint.rds'))
+  # spread_model_data = readRDS(paste0('data_collection/checkpoint_data/',max_year,'week',wk,'/spread_model_data_checkpoint.rds'))
+  # moneyline_model_data = readRDS(paste0('data_collection/checkpoint_data/',max_year,'week',wk,'/moneyline_model_data_checkpoint.rds'))
+  # 
+
+  data_list = list(passing_model_data %>% filter(is.na(out) | !out),
+                   rushing_model_data %>% filter(is.na(out) | !out),
+                   receiving_model_data %>% filter(is.na(out) | !out),
+                   touchdown_model_data %>% filter(is.na(out) | !out),
+                   rushing_receiving_model_data %>% filter(is.na(out) | !out),
+                   reception_model_data  %>% filter(is.na(out) | !out),
+                   moneyline_model_data,
+                   spread_model_data)
 
 
-data_list = list(passing_model_data %>% filter(is.na(out) | !out),
-                 rushing_model_data %>% filter(is.na(out) | !out),
-                 receiving_model_data %>% filter(is.na(out) | !out),
-                 touchdown_model_data %>% filter(is.na(out) | !out),
-                 rushing_receiving_model_data %>% filter(is.na(out) | !out),
-                 reception_model_data  %>% filter(is.na(out) | !out),
-                 moneyline_model_data,
-                 spread_model_data)
- 
+  t1 = Sys.time()
 
-t1 = Sys.time()
-
-if (mode == 'train')
-{
-  dir.create("model/ml_ready_data/train", showWarnings = FALSE, recursive = TRUE)
-  dir.create("model/ml_ready_data/test", showWarnings = FALSE, recursive = TRUE)
-  dir.create("model/ml_ready_data/final_test", showWarnings = FALSE, recursive = TRUE)
-} else if (mode == 'full_fit') {
-  dir.create('model/ml_ready_data/fulldata', showWarnings = FALSE)
-} else { #predict
-  dir.create(paste0('model/ml_ready_data/predictions/week',wk), showWarnings = FALSE, recursive = TRUE)
-}
-
-prep_lookup_table = data.frame(
-  response_var = c('passing_yards', 'rushing_yards', 'receiving_yards', 'anytime_td_scorer', 'rushing_receiving_yards', 'receptions', 'team_win', 'team_differential'),
-  numbers = c(paste(passing_numbers, collapse = '|'),
-              paste(rushing_numbers, collapse = '|'),
-              paste(receiving_numbers, collapse = '|'),
-              NA,
-              paste(rushing_receiving_numbers, collapse = '|'),
-              paste(reception_numbers, collapse = '|'),
-              NA,
-              paste(spread_numbers, collapse = '|')),
-  current_season_column_category = c("passing_current_season_stats", "rushing_current_season_stats", "receiving_current_season_stats", "touchdown_current_season_stats",
-                                     "rushing_current_season_stats|receiving_current_season_stats", 'receiving_current_season_stats', NA, NA),
-  historical_season_column_category = c("passing_past_season_stats", "rushing_past_season_stats", "receiving_past_season_stats", "touchdown_past_season_stats",
-                                        "rushing_past_season_stats|receiving_past_season_stats", 'receiving_past_season_stats', NA, NA)
-)
-model_mapping = get_supabase_data('predictions','ModelSelections')
-player_preds = data.frame()
-team_preds = data.frame()
-for (i in 1:length(data_list))
-{
-  response_var = prep_lookup_table$response_var[i]
-  print(paste('Prepping data for:', response_var))
-  prepped_data = model_prep(data_to_prep = data_list[[i]],
-                            column_categories = column_categories,
-                            train_mode = (mode == "train"),
-                            numbers = as.numeric(unlist(strsplit(prep_lookup_table$numbers[[i]], '\\|'))),
-                            response_var = response_var,
-                            current_season_column_category = prep_lookup_table$current_season_column_category[i],
-                            historical_season_column_category = prep_lookup_table$historical_season_column_category[i],
-                            acceptable_predictive_power = 'Suspicious,High,Medium,Low',
-                            num_winners = 10
-  )
-  if ('gsis_id' %in% colnames(data_list[[i]]))
+  if (mode == 'train')
   {
-    
-    identifier_data = data_list[[i]] %>%
-      select(season, week, gsis_id, display_name, team, opponent_team,
-             weekday, gameday, gametime, home_stadium, neutral_field,
-             position, jersey_number, draft_round, draft_pick, draft_year) %>%
-      mutate(time_of_day = case_when(
-        gametime < '12:00' ~ 'Morning',
-        gametime < '14:00'~ 'Early Window',
-        gametime < '19:00' ~ 'Late Window',
-        .default = 'Night'
-      ),
-      game_location = ifelse(home_stadium, 'Home', ifelse(neutral_field, 'Neutral', 'Away'))) %>% select(-home_stadium, -neutral_field)
-  } else {
-    identifier_data = data_list[[i]] %>%
-      select(season, week, team, opponent_team,
-             weekday, gameday, gametime, home_stadium, neutral_field) %>%
-      mutate(time_of_day = case_when(
-        gametime < '12:00' ~ 'Morning',
-        gametime < '14:00'~ 'Early Window',
-        gametime < '19:00' ~ 'Late Window',
-        .default = 'Night'
-      ),
-      game_location = ifelse(home_stadium, 'Home', ifelse(neutral_field, 'Neutral', 'Away'))) %>% select(-home_stadium, -neutral_field)
-  }
-    
-  if(mode == 'train')
-  {
-    for (j in 1:length(prepped_data[[1]]))
-    {
-      write_parquet(prepped_data[[1]][[j]], paste0('model/ml_ready_data/train/', names(prepped_data[[1]])[j], '.parquet'))
-      write_parquet(prepped_data[[2]][[j]], paste0('model/ml_ready_data/test/', names(prepped_data[[1]])[j], '.parquet'))
-      write_parquet(prepped_data[[3]][[j]], paste0('model/ml_ready_data/final_test/', names(prepped_data[[1]])[j], '.parquet'))
-    }
+    dir.create("model/ml_ready_data/train", showWarnings = FALSE, recursive = TRUE)
+    dir.create("model/ml_ready_data/test", showWarnings = FALSE, recursive = TRUE)
+    dir.create("model/ml_ready_data/final_test", showWarnings = FALSE, recursive = TRUE)
   } else if (mode == 'full_fit') {
-      for (j in 1:length(prepped_data))
-      {
-        write_parquet(prepped_data[[j]], paste0('model/ml_ready_data/fulldata/', names(prepped_data)[j], '.parquet'))
-      }
+    dir.create('model/ml_ready_data/fulldata', showWarnings = FALSE)
   } else { #predict
-    for (j in names(prepped_data))
+    dir.create(paste0('model/ml_ready_data/predictions/week',wk), showWarnings = FALSE, recursive = TRUE)
+  }
+
+  prep_lookup_table = data.frame(
+    response_var = c('passing_yards', 'rushing_yards', 'receiving_yards', 'anytime_td_scorer', 'rushing_receiving_yards', 'receptions', 'team_win', 'team_differential'),
+    numbers = c(paste(passing_numbers, collapse = '|'),
+                paste(rushing_numbers, collapse = '|'),
+                paste(receiving_numbers, collapse = '|'),
+                NA,
+                paste(rushing_receiving_numbers, collapse = '|'),
+                paste(reception_numbers, collapse = '|'),
+                NA,
+                paste(spread_numbers, collapse = '|')),
+    current_season_column_category = c("passing_current_season_stats", "rushing_current_season_stats", "receiving_current_season_stats", "touchdown_current_season_stats",
+                                       "rushing_current_season_stats|receiving_current_season_stats", 'receiving_current_season_stats', NA, NA),
+    historical_season_column_category = c("passing_past_season_stats", "rushing_past_season_stats", "receiving_past_season_stats", "touchdown_past_season_stats",
+                                          "rushing_past_season_stats|receiving_past_season_stats", 'receiving_past_season_stats', NA, NA)
+  )
+  model_mapping = get_supabase_data('predictions','ModelSelections')
+  player_preds = data.frame()
+  team_preds = data.frame()
+  for (i in 1:length(data_list))
+  {
+    response_var = prep_lookup_table$response_var[i]
+    print(paste('Prepping data for:', response_var))
+    prepped_data = model_prep(data_to_prep = data_list[[i]],
+                              column_categories = column_categories,
+                              train_mode = (mode == "train"),
+                              numbers = as.numeric(unlist(strsplit(prep_lookup_table$numbers[[i]], '\\|'))),
+                              response_var = response_var,
+                              current_season_column_category = prep_lookup_table$current_season_column_category[i],
+                              historical_season_column_category = prep_lookup_table$historical_season_column_category[i],
+                              acceptable_predictive_power = 'Suspicious,High,Medium,Low',
+                              num_winners = 10
+    )
+    if ('gsis_id' %in% colnames(data_list[[i]]))
     {
-      t1 = Sys.time()
-      this_df = prepped_data[[j]] %>% ungroup()
-      this_data = as.list(this_df)
-      these_preds = request("http://127.0.0.1:8000/predict") %>%
-        req_body_json(list(response_var = j, data = this_data), na = 'null') %>%
-        req_perform() %>% 
-        resp_body_json(simplifyVector = TRUE) %>%
-        as.data.frame()
-      if (str_detect(j, 'team'))
+
+      identifier_data = data_list[[i]] %>%
+        select(season, week, gsis_id, display_name, team, opponent_team,
+               weekday, gameday, gametime, home_stadium, neutral_field,
+               position, jersey_number, draft_round, draft_pick, draft_year) %>%
+        mutate(time_of_day = case_when(
+          gametime < '12:00' ~ 'Morning',
+          gametime < '14:00'~ 'Early Window',
+          gametime < '19:00' ~ 'Late Window',
+          .default = 'Night'
+        ),
+        game_location = ifelse(home_stadium, 'Home', ifelse(neutral_field, 'Neutral', 'Away'))) %>% select(-home_stadium, -neutral_field)
+    } else {
+      identifier_data = data_list[[i]] %>%
+        select(season, week, team, opponent_team,
+               weekday, gameday, gametime, home_stadium, neutral_field) %>%
+        mutate(time_of_day = case_when(
+          gametime < '12:00' ~ 'Morning',
+          gametime < '14:00'~ 'Early Window',
+          gametime < '19:00' ~ 'Late Window',
+          .default = 'Night'
+        ),
+        game_location = ifelse(home_stadium, 'Home', ifelse(neutral_field, 'Neutral', 'Away'))) %>% select(-home_stadium, -neutral_field)
+    }
+
+    if(mode == 'train')
+    {
+      for (j in 1:length(prepped_data[[1]]))
       {
-        these_preds = these_preds %>% mutate(season = max_year) %>%
-          left_join(identifier_data, join_by(season, 'Week' == 'week', team)) %>%
-          select(response_var, season, Week, team, opponent_team, Model_Probability, everything())
-        team_preds = bind_rows(team_preds, these_preds)
-      } else {
-        these_preds = these_preds %>% mutate(season = max_year) %>%
-          left_join(identifier_data, join_by(season, 'Week' == 'week', gsis_id)) %>%
-          mutate(draft_round = as.numeric(draft_round)) %>%
-          select(response_var, season, Week, gsis_id, Model_Probability, everything())
-        player_preds = bind_rows(player_preds, these_preds)
+        write_parquet(prepped_data[[1]][[j]], paste0('model/ml_ready_data/train/', names(prepped_data[[1]])[j], '.parquet'))
+        write_parquet(prepped_data[[2]][[j]], paste0('model/ml_ready_data/test/', names(prepped_data[[1]])[j], '.parquet'))
+        write_parquet(prepped_data[[3]][[j]], paste0('model/ml_ready_data/final_test/', names(prepped_data[[1]])[j], '.parquet'))
       }
-      print('API time:')
-      print(Sys.time() - t1)
+    } else if (mode == 'full_fit') {
+        for (j in 1:length(prepped_data))
+        {
+          write_parquet(prepped_data[[j]], paste0('model/ml_ready_data/fulldata/', names(prepped_data)[j], '.parquet'))
+        }
+    } else { #predict
+      for (j in names(prepped_data))
+      {
+        t1 = Sys.time()
+        this_df = prepped_data[[j]] %>% ungroup()
+        this_data = as.list(this_df)
+        #these_preds = request("http://127.0.0.1:8000/predict") %>%
+        these_preds = request("https://nfl-api-1062278650130.us-east4.run.app/predict") %>%
+          req_body_json(list(response_var = j, data = this_data), na = 'null') %>%
+          req_perform() %>%
+          resp_body_json(simplifyVector = TRUE) %>%
+          as.data.frame()
+        if (str_detect(j, 'team'))
+        {
+          these_preds = these_preds %>% mutate(season = max_year) %>%
+            left_join(identifier_data, join_by(season, 'Week' == 'week', team)) %>%
+            select(response_var, season, Week, team, opponent_team, Model_Probability, everything())
+          team_preds = bind_rows(team_preds, these_preds)
+        } else {
+          these_preds = these_preds %>% mutate(season = max_year) %>%
+            left_join(identifier_data, join_by(season, 'Week' == 'week', gsis_id)) %>%
+            mutate(draft_round = as.numeric(draft_round)) %>%
+            select(response_var, season, Week, gsis_id, Model_Probability, everything())
+          player_preds = bind_rows(player_preds, these_preds)
+        }
+        print('API time:')
+        print(Sys.time() - t1)
+      }
     }
   }
+
+  if (mode == 'predict')
+  {
+    write_to_supabase('predictions', 'PlayerPredictions', player_preds %>% mutate(updated_at = Sys.time()))
+    write_to_supabase('predictions', 'TeamPredictions', team_preds %>% mutate(updated_at = Sys.time()))
+  }
+
+  print(paste('Total time to prep:', difftime(Sys.time(), t1, units = 'hours'), 'hours'))
 }
-
-if (mode == 'predict')
-{
-  write_to_supabase('predictions', 'PlayerPredictions', player_preds %>% mutate(updated_at = Sys.time()))
-  write_to_supabase('predictions', 'TeamPredictions', team_preds %>% mutate(updated_at = Sys.time()))
-}
-
-
-print(paste('Total time to prep:', difftime(Sys.time(), t1, units = 'hours'), 'hours'))
-
 
 if (test_mode)
 {
   #portfolio:
   preds = bind_rows(player_preds %>% rename('label' = 'gsis_id', 'Position' = 'position'),
-                    team_preds %>% mutate('label' = 'team', 'Position' = 'team')) %>% mutate(Odds = 500) %>% select(response_var, Week, label, Odds, Model_Probability, Position, team, opponent_team)
-  bets_with_evs = request("http://127.0.0.1:8000/get_bets_with_ev") %>%
+                    team_preds %>% mutate(label = team, 'Position' = 'team')) %>% mutate(Odds = 500) %>% select(response_var, Week, label, Odds, Model_Probability, Position, team, opponent_team)
+  bets_with_evs = request("https://nfl-api-1062278650130.us-east4.run.app/get_bets_with_ev") %>%
     req_body_json(list(season = max_year,data = as.list(preds))) %>%
     req_perform() %>%
     resp_body_json(simplifyVector = TRUE) %>%
     as.data.frame()
-  portfolios = request("http://127.0.0.1:8000/get_portfolio") %>%
-    req_body_json(list(season = max_year, data = as.list(bets_with_evs), max_bets = 20, total_amount = 50, sd_cap = 2.0)) %>%
+  portfolios = request("https://nfl-api-1062278650130.us-east4.run.app/get_portfolio") %>%
+    req_body_json(list(season = max_year, data = as.list(bets_with_evs %>% slice(1:100)), max_bets = 20, total_amount = 50, sd_cap = 2.0)) %>%
    req_perform() %>%
     resp_body_json(simplifyVector = TRUE) %>%
     as.data.frame()
@@ -1200,8 +1216,3 @@ if (test_mode)
 #video_youtube_transcripts = get_transcripts(team_lookup_table, date_cutoff = '2020-08-01')
 
 #video_llm_results = get_video_llm_results(video_youtube_transcripts, player_lookup = player_data %>% ungroup() %>% select(gsis_id, display_name) %>% distinct())
-
-
-#call the model prep function and then call api for predictions
-#update the model prep function to work in predict mode (not train/test split)
-#write the probabilities to supabase

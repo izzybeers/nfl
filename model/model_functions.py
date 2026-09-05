@@ -553,7 +553,7 @@ def prepare_new_data(response, new_data, train_mode = True):
             train = pd.read_parquet(Path(f"./ml_ready_data/fulldata/{response}.parquet"))
         except Exception as e:
             try:
-                train = pd.read_parquet(Path(f"../ml_ready_data/train/{response}.parquet"))
+                train = pd.read_parquet(Path(f"../ml_ready_data/fulldata/{response}.parquet"))
             except Exception as e:
                 raise ValueError(f"Could not load train data: {e}")
     X_train = train.drop(columns = [response])

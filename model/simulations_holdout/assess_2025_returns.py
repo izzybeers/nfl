@@ -487,7 +487,7 @@ list_of_portfolios_to_run = {
 
 list_of_portfolios_to_run = {
     "Player + team, 20 bets, no penalties, screened": portfolio_20_bets_screened_with_no_penalties,
-    "Player only, 10 bets, no penalties, screened": portfolio_10_bets_screened_player_only_with_no_penalties
+    "Player + team, 10 bets, no penalties, screened": portfolio_10_bets_screened_with_no_penalties
 }
 
 bet_amount = 50
@@ -735,7 +735,7 @@ odds_return_summary = odds_return_check.groupby('Odds_Range', observed=False)\
     .assign(Spent=lambda x: 100 * x['N'], Return_Pct=lambda x: (x['Payout'] - x['Spent']) / x['Spent'],
             ImpliedProbPctError = lambda x: (x['Avg_Implied_Prob'] - x['Hit_Rate'])/x['Hit_Rate'])
 
-odds_return_summary[['Odds_Range', 'N', 'Hit_Rate', 'Avg_Implied_Prob', 'ImpliedProbPctError', 'Spent', 'Payout', 'Return_Pct']]
+display(odds_return_summary[['Odds_Range', 'N', 'Hit_Rate', 'Avg_Implied_Prob', 'ImpliedProbPctError', 'Spent', 'Payout', 'Return_Pct']])
 
 odds_return_check['Category'] = np.select(
     [
@@ -813,10 +813,68 @@ for category, df in category_odds.groupby('Category'):
 
 plt.axhline(0, linestyle='--', alpha=.5)
 plt.xlabel('Odds Range')
-plt.ylabel('Return (%)')
-plt.title('Return by Odds Range and Category (N > 100)')
+plt.ylabel('DraftKings Implied Prob % "Error"')
+plt.title('DraftKings Implied Prob % "Error" by Odds Range and Category (N > 100)')
 plt.xticks(rotation=45)
 plt.legend()
+plt.tight_layout()
+plt.show()
+
+#straight bets plot:
+import matplotlib.pyplot as plt
+
+number_of_straight_bets = range(1, 21)
+straight_bet_results = []
+
+for odds_cap in [None, 1000]:
+
+    bets = screened if odds_cap is None else screened[screened['Odds'] < odds_cap]
+
+    bets = calculate_ev_and_risk(
+        bets,
+        model_lookup_table,
+        penalize_by_model = False,
+        penalize_by_bin = False,
+        positive_only = True,
+        apply_ev_caps = True
+    )
+
+    for n in number_of_straight_bets:
+
+        top_bets = bets\
+            .sort_values(['Week', 'EVProfitPer100'], ascending = [True, False])\
+            .groupby('Week', as_index = False).head(n)\
+            .reset_index(drop = True)\
+            .assign(Portfolio_Weight = 1/n)
+
+        returns = aggregate_portfolios(top_bets, 'Week', 100)
+
+        straight_bet_results.append({
+            'num_bets': n,
+            'odds_cap': 'No Odds Cap' if odds_cap is None else '+1000 Odds Cap',
+            'total_return': (returns['payout'].sum() - returns['spent'].sum()) / returns['spent'].sum(),
+            'median_odds': top_bets['Odds'].median()
+        })
+
+straight_bet_results = pd.DataFrame(straight_bet_results)
+
+plt.figure(figsize = (10, 6))
+
+for group, df in straight_bet_results.groupby('odds_cap'):
+    plt.plot(
+        df['num_bets'],
+        100*df['total_return'],
+        marker = 'o',
+        label = group
+    )
+
+plt.axhline(0, linestyle = '--')
+plt.xlabel('Number of Straight Bets Per Week')
+plt.ylabel('2025 Return (%)')
+plt.title('Straight Bet Performance by Number of Bets')
+plt.xticks(range(1, 21))
+plt.legend()
+plt.grid(alpha = .3)
 plt.tight_layout()
 plt.show()
 #%%
