@@ -4,11 +4,14 @@ output: html_document
 params:
   bet_table: null
   survivor_teams: null
-  depth_charts: null
+  bet_details: null
   team_lookup_table: null
+  season: null
+  week: null
 ---
 
 ```{r setup, include=FALSE}
+
 knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
 ```
 
@@ -20,67 +23,45 @@ library(rvest)
 library(htmltools)
 library(lubridate)
 library(stringr)
-
-clean_names = function(name)
-{
-  return(tolower(name) %>% str_remove_all("[[:punct:]]+") %>% str_remove("\\b(jr|sr|i{1,3}|iv|v|vi{1,3}|ix|x|xi{1,3})\\b") %>% str_squish() %>% trimws())
-}
-
-
-
+library(nflreadr)
+source('app_helper_funs.R')
 
 ```
 
 
 ```{r}
-
-
-depth_charts = params$depth_charts %>% select(Player, No, Position)
-
-
 bettors = unique(params$bet_table$Bettor)
-placed_bets = params$bet_table %>% mutate(clean = clean_names(Player)) %>%
-  inner_join(depth_charts, join_by('clean' == 'Player')) %>%
-  select(-clean)
+placed_bets = params$bet_table %>%
+  inner_join(params$bet_details %>% select(bet_display_name, depth_rank, jersey_number, position) %>% distinct(), join_by('Label' == 'bet_display_name'))
 
-
-placed_bets = placed_bets %>% filter(Gametime >= Sys.time() - 120*60)
-
-
-
-url = paste0("https://www.pro-football-reference.com/years/", unique(placed_bets$Season), '/games.htm')
-session = session(url, user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/113.0.0.0 Safari/537.36"))
-schedule_html = read_html(session)
-schedule_table_node = schedule_html %>% html_node('table#games')
-if (!inherits(schedule_table_node, "xml_missing"))
-{
-  schedule_table = schedule_table_node %>% html_table(fill = TRUE)
-  schedule_table$Week = case_when(
-        schedule_table$Week == 'WildCard' ~ 19,
-        schedule_table$Week == 'Division' ~ 20,
-        schedule_table$Week == 'ConfChamp' ~ 21,
-        schedule_table$Week == 'SuperBowl' ~ 22,
-        .default = as.numeric(schedule_table$Week)
-      )
-} else {
-   schedule_table = NULL
-}
-games= schedule_table[which(schedule_table$Week == unique(placed_bets$Week)),c(1,2,3,4,5,7)]  %>%
-  mutate(Time = format(strptime(Time, "%I:%M%p"), "%H:%M"),
-         posix_timestamp_game = as.POSIXct(paste(Date, Time), tz = "America/New_York")) %>%
-  mutate(time_parsed = parse_date_time(Time, orders = c("I:Mp","I:M p","H:M")),
-         Timeslot = paste(Day, case_when(hour(time_parsed) < 11 ~ 'Morning',
+placed_bets = placed_bets %>% mutate(Team = ifelse(Team == 'LA', 'LAR', Team), Opp = ifelse(Opp == 'LA','LAR',Opp)) %>%
+  filter(Gametime >= Sys.time() - 120*60) %>%
+  left_join(params$team_lookup_table %>% select(FullName, TV_abbr) %>% rename('TeamFullName' = 'FullName'), join_by('Team' == 'TV_abbr')) %>%
+  left_join(params$team_lookup_table %>% select(FullName, TV_abbr) %>% rename('OppFullName' = 'FullName'), join_by('Opp' == 'TV_abbr')) %>%
+  mutate(game = paste(pmin(TeamFullName, OppFullName), pmax(TeamFullName, OppFullName), sep = " - "))
+      
+games = load_schedules(params$season) %>% clean_homeaway() %>% filter(week == params$week) %>%
+  mutate(team = ifelse(team == 'LA', 'LAR', team),
+         opponent = ifelse(opponent == 'LA','LAR',opponent)) %>%
+  mutate(posix_timestamp_game = as.POSIXct(paste(gameday, gametime), tz = "America/New_York")) %>%
+  mutate(time_parsed = parse_date_time(gametime, orders = c("I:Mp","I:M p","H:M")),
+         Timeslot = paste(weekday, case_when(hour(time_parsed) < 11 ~ 'Morning',
                                          hour(time_parsed) < 15 ~ 'Early Window',
                                          hour(time_parsed) < 19 ~ 'Late Window',
-                                         TRUE ~ 'Night')))
+                                         TRUE ~ 'Night'))) %>%
+  left_join(params$team_lookup_table %>% select(FullName, TV_abbr) %>% rename('TeamFullName' = 'FullName'), join_by('team' == 'TV_abbr')) %>%
+  left_join(params$team_lookup_table %>% select(FullName, TV_abbr) %>%
+              rename('OppFullName' = 'FullName'), join_by('opponent' == 'TV_abbr')) %>%
+  mutate(game = paste(pmin(TeamFullName, OppFullName),
+                      pmax(TeamFullName, OppFullName),
+                      sep = " - ")) %>%
+  arrange(TeamFullName)
 
 if(length(params$survivor_teams) > 0)
 {
   survivor_team_df = params$survivor_teams %>% data.frame()
   colnames(survivor_team_df) = 'Survivor_Team'
-  survivor_team_df = survivor_team_df %>% inner_join(games %>% rename('Opp' = `Loser/tie`), join_by('Survivor_Team' == `Winner/tie`)) %>%
-    rbind(survivor_team_df %>% inner_join(games %>% rename('Opp' = `Winner/tie`), join_by('Survivor_Team' == `Loser/tie`))) %>%
-   select(Survivor_Team, Opp, Timeslot)
+  survivor_team_df = survivor_team_df %>% inner_join(games %>% select(team, opponent, Timeslot, game), join_by('Survivor_Team' == 'team'))
 } else{
   survivor_team_df = NULL
 }
@@ -93,9 +74,8 @@ if(length(params$survivor_teams) > 0)
 
 for (t in games %>% arrange(posix_timestamp_game) %>% select(Timeslot) %>% distinct() %>% pull())
 {
+  bets_this_timeslot = placed_bets %>% filter(Timeslot == t) %>% arrange(Team)
   
-  #count bets and survivor teams in this timeslot
-  bets_this_timeslot = placed_bets %>% filter(Timeslot == t)
   if(!is.null(survivor_team_df) && nrow(survivor_team_df)> 0)
   {
     survivors_this_timeslot = survivor_team_df %>% filter(Timeslot == t)
@@ -103,38 +83,38 @@ for (t in games %>% arrange(posix_timestamp_game) %>% select(Timeslot) %>% disti
     survivors_this_timeslot = NULL
   }
   
-  
-  if(nrow(bets_this_timeslot) > 0 | (!is.null(survivors_this_timeslot) && nrow(survivors_this_timeslot) > 0)) #if there is at least one bet or survivor in this timeslot
+  if((nrow(bets_this_timeslot) > 0) | (!is.null(survivors_this_timeslot) && nrow(survivors_this_timeslot) > 0)) #if there is at least one bet or survivor in this timeslot
   {
     print(tags$h1(t)) #main heading for the timeslot
     
-    if(!is.null(survivors_this_timeslot) && nrow(survivors_this_timeslot) > 0) #survivor section
+    for(g in unique(games %>% filter(Timeslot == t) %>% pull(game)))
     {
-      print(tags$h4(paste('Survivor Games:')))
-      for(s in 1:nrow(survivors_this_timeslot))
+      bets_this_game = bets_this_timeslot %>% filter(game == g)
+      if(!is.null(survivors_this_timeslot))
       {
-        print(tags$p(paste0(survivors_this_timeslot$Survivor_Team[s], ' (vs. ', survivors_this_timeslot$Opp[s], ')')))
+        survivors_this_game = survivors_this_timeslot %>% filter(Survivor_Team %in% games$team[games$game == g])
+      } else {
+        survivors_this_game = NULL
       }
-    }
- 
-    if(nrow(bets_this_timeslot) > 0) #bets section
-    {
-      bets_this_timeslot = bets_this_timeslot %>% left_join(params$team_lookup_table %>% select(FullName, Team) %>% rename('TeamFullName' = 'FullName'), join_by('Team')) %>%
-         left_join(params$team_lookup_table %>% select(FullName, Team) %>% rename('OppFullName' = 'FullName'), join_by('Opp' == 'Team'))
-      
-      bets_this_timeslot = bets_this_timeslot %>% mutate(game = paste(pmin(TeamFullName, OppFullName),
-                                                           pmax(TeamFullName, OppFullName),
-                                                           sep = " - ")) %>% arrange(Team)
-    
-      
-      for(g in unique(bets_this_timeslot$game))
+      exist_survivors = !is.null(survivors_this_game) && nrow(survivors_this_game) > 0
+      exist_bets = nrow(bets_this_game) > 0
+      if (exist_survivors | exist_bets)
       {
-        print(tags$h4(paste(g, 'Bets')))
-        this_game = bets_this_timeslot %>% filter(game == g)
-        players_this_game = this_game %>% group_by(Player, Bet_Type, Label) %>% summarise(Bettors = paste(Bettor, collapse = ","), TeamFullName = max(TeamFullName), Number = max(No), Position = max(Position)) %>% arrange(TeamFullName)
-        for(p in 1:nrow(players_this_game))
+        print(tags$h4(g))
+        if(exist_survivors) #survivor section
         {
-          print(tags$p(paste0(ifelse(length(bettors) > 1, paste0(players_this_game$Bettors[p], ": "), ''), players_this_game$Player[p], ' (', players_this_game$TeamFullName[p],', ', players_this_game$Position[p], ' #', players_this_game$Number[p], ') -- ', players_this_game$Bet_Type[p], ifelse(players_this_game$Bet_Type[p] == 'Anytime TD Scorer', '', players_this_game$Label[p]))))
+          for(s in 1:nrow(survivors_this_game))
+          {
+            print(tags$p(paste0('Survivor pick: ', survivors_this_game$Survivor_Team[s])))
+          }
+        }
+        if (exist_bets)
+        {
+          players_this_game = bets_this_game %>% group_by(Label) %>% summarise(Bettors = paste(unique(Bettor), collapse = ","), TeamFullName = max(TeamFullName), Number = max(jersey_number), Position = max(position)) %>% arrange(TeamFullName)
+          for(p in 1:nrow(players_this_game))
+          {
+            print(tags$p(paste0(ifelse(length(bettors) > 1, paste0(players_this_game$Bettors[p], ": "), ''), players_this_game$Label[p], ' (', players_this_game$TeamFullName[p],', ', players_this_game$Position[p], ' #', players_this_game$Number[p], ')'))) 
+          }
         }
       }
     }
