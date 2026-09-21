@@ -1,18 +1,20 @@
-library(nflreadr)
-library(nflseedR)
-library(dplyr)
-library(jsonlite)
-library(lubridate)
-#library(gemini.R)
-library(stringr)
-library(httr)
-library(purrr)
-library(ggplot2)
-library(tidyr)
-library(scorecard)
-library(httr2)
-library(arrow)
-library(furrr)
+suppressPackageStartupMessages({
+  library(nflreadr)
+  library(nflseedR)
+  library(dplyr)
+  library(jsonlite)
+  library(lubridate)
+  #library(gemini.R)
+  library(stringr)
+  library(httr)
+  library(purrr)
+  library(ggplot2)
+  library(tidyr)
+  library(scorecard)
+  library(httr2)
+  library(arrow)
+  library(furrr)
+})
 source('model/data_prep_functions.R')
 source('data_collection/scripts/global.R')
 source('data_collection/scripts/player_data.R')
@@ -862,23 +864,23 @@ data_collection = function(mode, min_year, max_year, wk, num_iv_winners = 10, te
     moneyline_model_data = moneyline_model_data %>% filter(season == max_year & week == wk)
     spread_model_data = spread_model_data %>% filter(season == max_year & week == wk)
     
-      # if (test_mode)
-      # {
-      #   dir_name = paste0("data_collection/testing_checkpoint_data/", max_year,'week',wk,'/')
-      #   dir.create(dir_name, recursive = TRUE, showWarnings = FALSE)
-      #   saveRDS(blue_chip_analysis_df, paste0(dir_name, "/testmode_blue_chip_analysis_df_checkpoint.rds"))
-      # } else {
-      #   dir_name = paste0("data_collection/checkpoint_data/", max_year,'week',wk,'/')
-      #   dir.create(dir_name, recursive = TRUE, showWarnings = FALSE)
-      # }
-      # saveRDS(passing_model_data, paste0(dir_name, '/passing_model_data_checkpoint.rds'))
-      # saveRDS(rushing_model_data, paste0(dir_name, '/rushing_model_data_checkpoint.rds'))
-      # saveRDS(receiving_model_data, paste0(dir_name, '/receiving_model_data_checkpoint.rds'))
-      # saveRDS(touchdown_model_data, paste0(dir_name, '/touchdown_model_data_checkpoint.rds'))
-      # saveRDS(rushing_receiving_model_data, paste0(dir_name, '/rushing_receiving_model_data_checkpoint.rds'))
-      # saveRDS(reception_model_data, paste0(dir_name, '/reception_model_data_checkpoint.rds'))
-      # saveRDS(spread_model_data, paste0(dir_name, '/spread_model_data_checkpoint.rds'))
-      # saveRDS(moneyline_model_data, paste0(dir_name, '/moneyline_model_data_checkpoint.rds'))
+      if (test_mode)
+      {
+        dir_name = paste0("data_collection/testing_checkpoint_data/", max_year,'week',wk,'/')
+        dir.create(dir_name, recursive = TRUE, showWarnings = FALSE)
+        saveRDS(blue_chip_analysis_df, paste0(dir_name, "/testmode_blue_chip_analysis_df_checkpoint.rds"))
+      } else {
+        dir_name = paste0("data_collection/checkpoint_data/", max_year,'week',wk,'/')
+        dir.create(dir_name, recursive = TRUE, showWarnings = FALSE)
+      }
+      saveRDS(passing_model_data, paste0(dir_name, '/passing_model_data_checkpoint.rds'))
+      saveRDS(rushing_model_data, paste0(dir_name, '/rushing_model_data_checkpoint.rds'))
+      saveRDS(receiving_model_data, paste0(dir_name, '/receiving_model_data_checkpoint.rds'))
+      saveRDS(touchdown_model_data, paste0(dir_name, '/touchdown_model_data_checkpoint.rds'))
+      saveRDS(rushing_receiving_model_data, paste0(dir_name, '/rushing_receiving_model_data_checkpoint.rds'))
+      saveRDS(reception_model_data, paste0(dir_name, '/reception_model_data_checkpoint.rds'))
+      saveRDS(spread_model_data, paste0(dir_name, '/spread_model_data_checkpoint.rds'))
+      saveRDS(moneyline_model_data, paste0(dir_name, '/moneyline_model_data_checkpoint.rds'))
   }
 
     
@@ -1193,22 +1195,22 @@ data_collection = function(mode, min_year, max_year, wk, num_iv_winners = 10, te
   print(paste('Total time to prep:', difftime(Sys.time(), t1, units = 'hours'), 'hours'))
 }
 
-if (test_mode)
-{
-  #portfolio:
-  preds = bind_rows(player_preds %>% rename('label' = 'gsis_id', 'Position' = 'position'),
-                    team_preds %>% mutate(label = team, 'Position' = 'team')) %>% mutate(Odds = 500) %>% select(response_var, Week, label, Odds, Model_Probability, Position, team, opponent_team)
-  bets_with_evs = request("https://nfl-api-1062278650130.us-east4.run.app/get_bets_with_ev") %>%
-    req_body_json(list(season = max_year,data = as.list(preds))) %>%
-    req_perform() %>%
-    resp_body_json(simplifyVector = TRUE) %>%
-    as.data.frame()
-  portfolios = request("https://nfl-api-1062278650130.us-east4.run.app/get_portfolio") %>%
-    req_body_json(list(season = max_year, data = as.list(bets_with_evs %>% slice(1:100)), max_bets = 20, total_amount = 50, sd_cap = 2.0)) %>%
-   req_perform() %>%
-    resp_body_json(simplifyVector = TRUE) %>%
-    as.data.frame()
-}
+# if (test_mode)
+# {
+#   #portfolio:
+#   preds = bind_rows(player_preds %>% rename('label' = 'gsis_id', 'Position' = 'position'),
+#                     team_preds %>% mutate(label = team, 'Position' = 'team')) %>% mutate(Odds = 500) %>% select(response_var, Week, label, Odds, Model_Probability, Position, team, opponent_team)
+#   bets_with_evs = request("https://nfl-api-1062278650130.us-east4.run.app/get_bets_with_ev") %>%
+#     req_body_json(list(season = max_year,data = as.list(preds))) %>%
+#     req_perform() %>%
+#     resp_body_json(simplifyVector = TRUE) %>%
+#     as.data.frame()
+#   portfolios = request("https://nfl-api-1062278650130.us-east4.run.app/get_portfolio") %>%
+#     req_body_json(list(season = max_year, data = as.list(bets_with_evs %>% slice(1:100)), max_bets = 20, total_amount = 50, sd_cap = 2.0)) %>%
+#    req_perform() %>%
+#     resp_body_json(simplifyVector = TRUE) %>%
+#     as.data.frame()
+# }
 
 
 
