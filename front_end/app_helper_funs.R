@@ -44,28 +44,15 @@ get_supabase_data = function(schema, table_name, additional_sql = list(),
   offset = 0
   
   repeat {
-    query_params = c(
-      list(
-        select = select,
-        limit = page_size,
-        offset = offset
-      ),
-      additional_sql
-    )
+    query_params = c(list(select = select, limit = page_size, offset = offset), additional_sql)
     
-    if (!is.null(order_by)) {
+    if (!is.null(order_by))
+    {
       query_params$order = order_by
     }
     
-    response = GET(
-      url,
-      query = query_params,
-      add_headers(
-        "apikey" = SUPABASE_KEY,
-        "Authorization" = paste("Bearer", SUPABASE_KEY),
-        "Accept-Profile" = schema
-      )
-    )
+    response = GET(url, query = query_params,
+                   add_headers("apikey" = SUPABASE_KEY, "Authorization" = paste("Bearer", SUPABASE_KEY), "Accept-Profile" = schema))
     
     if (http_error(response)) {
       stop(content(response, "text", encoding = "UTF-8"))
@@ -200,9 +187,9 @@ clean_names = function(name)
 }
 
 
-pull_prediction_data = function()
+pull_prediction_data = function(season, week)
 {
-  player_info = get_supabase_data('predictions', 'PlayerPredictions') %>%
+  player_info = get_supabase_data('predictions', 'PlayerPredictions', additional_sql = list(season = paste0("eq.", season),Week = paste0("eq.", week))) %>%
     group_by(response_var, season, Week, gsis_id) %>%
     arrange(desc(updated_at)) %>% 
     slice(1) %>% ungroup() %>%
@@ -210,7 +197,7 @@ pull_prediction_data = function()
     rename('Position' = 'position') %>%
     mutate(timeslot = paste(weekday, time_of_day)) %>% select(-time_of_day)
   
-  team_info = get_supabase_data('predictions', 'TeamPredictions') %>%
+  team_info = get_supabase_data('predictions', 'TeamPredictions', additional_sql = list(season = paste0("eq.", season),Week = paste0("eq.", week))) %>%
     group_by(response_var, season, Week, team) %>%
     arrange(desc(updated_at))  %>% 
     slice(1) %>% ungroup() %>%
@@ -221,23 +208,42 @@ pull_prediction_data = function()
 
 get_bet_ids_by_category = function()
 {
-  response = httr::GET(paste0(dk_proxy_url, "/get_bet_ids_by_category"), httr::timeout(30))
-  if(httr::status_code(response) != 200)
+  source('dk_api.R')
+  props_lookup = bet_ids_helper()
+  if (!is.null(props_lookup) && nrow(props_lookup) > 0) 
   {
-    stop("Bet category API failed. Status: ", httr::status_code(response), ". Response: ",
-         substr(httr::content(response, as = "text", encoding = "UTF-8"), 1, 500))
+    need_proxy = FALSE
+  } else {
+    need_proxy = TRUE
+    message("DK category request failed locally. Calling cloudflare tunnel...")
+    response = httr::GET(paste0(dk_proxy_url, "/get_bet_ids_by_category"), httr::timeout(30))
+    if(httr::status_code(response) != 200)
+    {
+      stop("Bet category API failed. Status: ", httr::status_code(response), ". Response: ",
+           substr(httr::content(response, as = "text", encoding = "UTF-8"), 1, 500))
+    } else {
+      props_lookup = jsonlite::fromJSON(httr::content(response, as = "text", encoding = "UTF-8"))
+    }
   }
-  props_lookup = jsonlite::fromJSON(httr::content(response, as = "text", encoding = "UTF-8"))
-  return(props_lookup)
+  
+  return(list(props_lookup, need_proxy))
 }
 
 get_props = function() {
   
-  props_lookup = get_bet_ids_by_category()
+  props_lookup_list = get_bet_ids_by_category()
+  props_lookup = props_lookup_list[[1]]
+  needs_proxy = props_lookup_list[[2]]
+  
+  if(!needs_proxy)
+  {
+    source('dk_api.R')
+  }
   
   if (is.null(props_lookup) || nrow(props_lookup) == 0) {
     return(NULL)
   }
+  props_lookup$response_var_root[props_lookup$name == 'Rush + Rec Yards'] = 'rushing_receiving_yards'
   lines_df = data.frame()
   for (i in 1:nrow(props_lookup))
   {
@@ -245,8 +251,17 @@ get_props = function() {
     bet_name = props_lookup$name[i]
     response_var_root = props_lookup$response_var_root[i]
     
-    lines_response = httr::GET(paste0(dk_proxy_url, "/lines_by_bet_id"), query = list(bet_id = bet_id), httr::timeout(30))
-    data = lines_response %>% httr::content(as = "text", encoding = "UTF-8") %>% jsonlite::fromJSON(flatten = TRUE)
+    if (needs_proxy)
+    {
+      lines_response = httr::GET(paste0(dk_proxy_url, "/lines_by_bet_id"), query = list(bet_id = bet_id), httr::timeout(30))
+      data = lines_response %>% httr::content(as = "text", encoding = "UTF-8") %>% jsonlite::fromJSON(flatten = TRUE)
+    } else {
+      data = lines_by_bet_id_helper(bet_id)
+      if (!is.null(data) && !is.null(data$selections) &&  length(data$selections) > 0)
+      {
+        data$selections = jsonlite::flatten(data$selections, recursive = TRUE)
+      }
+    }
     if (length(data$selections) > 0)
     {
       lines = data$selections %>% select(any_of(c('marketId', 'label', 'displayOdds.american', 'points'))) %>%
@@ -317,9 +332,9 @@ get_props = function() {
   return(lines_df)
 }
 
-get_spreads = function()
+get_spreads = function(season)
 {
-  bet_id_spread = get_bet_ids_by_category() %>% filter(name == 'Game') %>% pull(id)
+  bet_id_spread = get_bet_ids_by_category()[[1]] %>% filter(name == 'Game') %>% pull(id)
   
   spread_lines_response = httr::GET(paste0(dk_proxy_url, "/lines_by_bet_id"), query = list(bet_id = bet_id_spread), httr::timeout(30))
   spread_data = spread_lines_response %>% httr::content(as = "text", encoding = "UTF-8") %>% jsonlite::fromJSON(flatten = TRUE)
@@ -331,27 +346,54 @@ get_spreads = function()
       rename('Odds' = `displayOdds.american`) %>%
       left_join(spread_data$events %>% select(id, startEventDate), join_by('eventId' == 'id'))
   }
-  
   spread = spread_lines %>% filter(name == 'Spread') %>% 
-    select(label, points, startEventDate)
-  first_game_per_team = spread %>% group_by(label) %>% summarize(startEventDate = min(startEventDate))
-  spread = spread %>% inner_join(first_game_per_team, join_by('label', 'startEventDate'))
+    select(label, points, startEventDate) %>% mutate(gameday = as.character(as.Date(lubridate::ymd_hms(startEventDate, tz = "UTC"), tz = "America/New_York")))
+  schedules = load_schedules(season:season) %>% clean_homeaway() %>% 
+    mutate(time = as.POSIXct(paste(gameday, gametime), format = "%Y-%m-%d %H:%M", tz = "America/New_York")) %>%
+    filter(time > lubridate::now(tzone = "America/New_York")) %>%
+    select(team, opponent, week, gameday, location) %>% rename('game_location' = 'location')
+  #first_game_per_team = spread %>% group_by(label) %>% summarize(startEventDate = min(startEventDate))
+  #spread = spread %>% inner_join(first_game_per_team, join_by('label', 'startEventDate'))
   spread$team_shortname = sapply(strsplit(spread$label, ' '), function(x) x[2:length(x)])
   spread = spread %>% left_join(team_lookup %>% select(ShortName, TV_abbr), join_by('team_shortname' == 'ShortName')) %>% rename('team' = 'TV_abbr') %>%
-    select(label, points, team)
+    select(label, points, team, gameday) %>% inner_join(schedules %>% mutate(team = ifelse(team == 'LA','LAR',team)), join_by('team', 'gameday'))
   return(spread)
 
+}
+
+get_survivor_future_values = function(week)
+{
+  data = read.csv("https://docs.google.com/spreadsheets/d/e/2PACX-1vTy1D5OrjXvMJ4wYfCc3zjYlwsaqOZmhLU5LT6erZP_U8Y7k9ZB265KCfFz-UTRJpi1xaHhd51DMesb/pub?gid=1298960343&single=true&output=csv") %>%
+    filter(Week > week)
+  survivor_pool_by_week = data %>% group_by(Week) %>% mutate(SafePicks = sum(Pick != '')) %>% ungroup() %>%
+    filter(Pick != '') %>% group_by(Week) %>% summarise(SafePicks = max(SafePicks),
+                                                        Picks = paste(Pick, collapse = ','),
+                                                        PickDetails = paste(Pick, '(vs', ifelse(Pick == Home, paste(Away, '- Home)'), paste(Home, '- Away)')), collapse = '<br>')) %>%
+    arrange(SafePicks)
+  options_by_team = data %>% filter(Pick != '') %>%
+    group_by(Pick) %>% summarise(num_weeks = n_distinct(Week),
+                                 options = paste('Week', Week, '(vs', ifelse(Pick == Home, paste(Away, '- Home)'), paste(Home, '- Away)')), collapse = '<br>')) %>%
+    right_join(team_lookup %>% select(FullName), join_by('Pick' == 'FullName')) %>% mutate(num_weeks = coalesce(num_weeks, 0), options = coalesce(options, '')) %>% arrange(desc(num_weeks))
+  
+  weeks_with_one_choice = survivor_pool_by_week %>% filter(SafePicks == 1)
+  weeks_with_two_choices = survivor_pool_by_week %>% filter(SafePicks == 2) %>%
+    separate_wider_delim(Picks, delim = ',', names = c('Team1','Team2')) %>%
+    separate_wider_delim(PickDetails, delim = '<br>', names = c('TeamDetails1', 'TeamDetails2')) %>%
+                           select(Week, Team1, Team2, TeamDetails1, TeamDetails2)
+    return(list(survivor_pool_by_week, options_by_team, weeks_with_one_choice, weeks_with_two_choices))                                                             
 }
 
 
 join_preds_and_props = function(player_preds, team_preds)
 {
-  props = get_props()
+  props = get_props() %>% filter(bet_type %in% c('Anytime TD Scorer', 'Receiving Yards', 'Rush Yards', 'Rush + Rec Yards', 'Spread', 'Spread Alternate', 'Moneyline', 'Pass Yards', 'Receptions'))
   
   if (is.null(props))
   {
     return(NULL)
   }
+  max_gameday = max(player_preds$gameday)
+  props = props %>% filter(gameday <= max_gameday)
   
   preds_to_match = bind_rows(player_preds %>% rename('label' = 'cleaned_name') %>% mutate(team = ifelse(team == 'LA', 'LAR', team)) %>% select(response_var, Week, label, Model_Probability, Position, team, opponent_team, timeslot, gameday, gametime, game_location, gsis_id),
                              team_preds %>% mutate(label = team) %>% mutate(label = ifelse(label == 'LA', 'LAR', label), team = ifelse(team == 'LA', 'LAR', team)) %>% mutate(Position = 'team') %>% select(response_var, Week, label, Model_Probability, Position, team, opponent_team, timeslot, gameday, gametime, game_location)) %>%
@@ -362,7 +404,7 @@ join_preds_and_props = function(player_preds, team_preds)
     ) %>%
     select(bet_display_name, response_var, Week, label, Model_Probability, Position, Odds, Betting_Line_Implied_Prob, bet_type, team, opponent_team, timeslot, game_location, posix_timestamp, gsis_id)
   names_missing = joined %>% group_by(label) %>% summarize(num_nonmissing = sum(!is.na(Model_Probability))) %>% filter(num_nonmissing == 0) %>% pull(label) %>% unique()
-  joined = joined %>% filter(posix_timestamp > Sys.time() - 3600)
+  joined = joined %>% filter(is.na(posix_timestamp) | posix_timestamp > lubridate::now(tzone = "America/New_York") - lubridate::hours(1))
   if(!is.null(existing_error_logs))
   {
     names_missing_unaccounted_for = names_missing[-which(names_missing %in% existing_error_logs$error_description[existing_error_logs$error_type == 'Missing Player'])]
@@ -371,13 +413,12 @@ join_preds_and_props = function(player_preds, team_preds)
   }
   if (length(names_missing_unaccounted_for) > 0)
   {
-    write_to_supabase('betting','ErrorLogs', data.frame(error_type = 'Missing Player', error_description = names_missing_unaccounted_for))
+    write_to_supabase('betting','ErrorLogs', data.frame(error_type = 'Missing Player/Team', error_description = names_missing_unaccounted_for))
   }
   joined = joined %>% filter(!is.na(opponent_team))
   
   return(joined)
 }
-
 pull_details = function(bets, bios, player_stats, team_stats, opp_stats, stats_season) {
   
   last_stats_season = stats_season - 1
@@ -399,7 +440,22 @@ pull_details = function(bets, bios, player_stats, team_stats, opp_stats, stats_s
   html_join = function(...) {
     x = unlist(list(...), use.names = FALSE)
     x = x[!is.na(x) & nzchar(x)]
-    paste(x, collapse = "<br><br>")
+    paste(x, collapse = "<br>")
+  }
+  
+  text_join = function(...) {
+    x = unlist(list(...), use.names = FALSE)
+    x = x[!is.na(x) & nzchar(x)]
+    paste(x, collapse = ", ")
+  }
+  
+  rank_description = function(season_label, ranks, labels) {
+    keep = !is.na(ranks)
+    if (!any(keep)) return("")
+    paste0(
+      "<b>", season_label, ":</b> ",
+      paste0("#", ranks[keep], " ranked defense in ", labels[keep], collapse = ", ")
+    )
   }
   
   html_section = function(title, body) {
@@ -440,7 +496,17 @@ pull_details = function(bets, bios, player_stats, team_stats, opp_stats, stats_s
         "<b>",team, " vs ", opponent_team, " (", game_location, ") - ", timeslot, "</b><br>",
         "<b>Model Probability: </b>", round(100*Model_Probability, 1), "%<br>",
         "<b>Odds: </b>", Odds, " (Market Implied Probability: ",
-        round(100*Betting_Line_Implied_Prob, 1), "%)<br><br>",
+        round(100*Betting_Line_Implied_Prob, 1), "%)<br>",
+        "<b>$10 Bet Payout: </b>$",
+        formatC(
+          ifelse(
+            as.numeric(Odds) > 0,
+            10 + 10 * as.numeric(Odds) / 100,
+            10 + 1000 / abs(as.numeric(Odds))
+          ),
+          format = "f", digits = 2
+        ),
+        "<br><br>",
         ifelse(is.na(gsis_id), "",
                paste0(player_position, " - ",
                       ifelse(is.na(draft_round) | draft_round == "", "Undrafted",
@@ -650,6 +716,10 @@ pull_details = function(bets, bios, player_stats, team_stats, opp_stats, stats_s
     ) %>%
     select(
       opponent_team,
+      pass_allowed_rank,
+      completions_allowed_rank,
+      rushing_allowed_rank,
+      tds_allowed_rank,
       pass_defense_description,
       rush_defense_description,
       td_defense_description
@@ -708,6 +778,10 @@ pull_details = function(bets, bios, player_stats, team_stats, opp_stats, stats_s
     ) %>%
     select(
       opponent_team,
+      last_season_pass_allowed_rank = pass_allowed_rank,
+      last_season_completions_allowed_rank = completions_allowed_rank,
+      last_season_rushing_allowed_rank = rushing_allowed_rank,
+      last_season_tds_allowed_rank = tds_allowed_rank,
       last_season_pass_defense_description,
       last_season_rush_defense_description,
       last_season_td_defense_description
@@ -1088,20 +1162,149 @@ pull_details = function(bets, bios, player_stats, team_stats, opp_stats, stats_s
         TRUE ~ ""
       ),
       
-      td_position_defense_description = case_when(
+      td_combined_defense_description = case_when(
         td_position_stat == "passing" ~
-          html_join(pass_defense_description,
-                    last_season_pass_defense_description),
+          html_join(
+            rank_description(
+              "This season",
+              c(tds_allowed_rank, pass_allowed_rank),
+              c("touchdowns allowed", "passing yards allowed")
+            ),
+            rank_description(
+              "Last season",
+              c(last_season_tds_allowed_rank, last_season_pass_allowed_rank),
+              c("touchdowns allowed", "passing yards allowed")
+            )
+          ),
         
         td_position_stat == "rushing" ~
-          html_join(rush_defense_description,
-                    last_season_rush_defense_description),
+          html_join(
+            rank_description(
+              "This season",
+              c(tds_allowed_rank, rushing_allowed_rank),
+              c("touchdowns allowed", "rushing yards allowed")
+            ),
+            rank_description(
+              "Last season",
+              c(last_season_tds_allowed_rank, last_season_rushing_allowed_rank),
+              c("touchdowns allowed", "rushing yards allowed")
+            )
+          ),
         
         td_position_stat == "receiving" ~
-          html_join(pass_defense_description,
-                    last_season_pass_defense_description),
+          html_join(
+            rank_description(
+              "This season",
+              c(tds_allowed_rank, completions_allowed_rank),
+              c("touchdowns allowed", "passing completions allowed")
+            ),
+            rank_description(
+              "Last season",
+              c(last_season_tds_allowed_rank, last_season_completions_allowed_rank),
+              c("touchdowns allowed", "passing completions allowed")
+            )
+          ),
         
         TRUE ~ ""
+      ),
+      
+      rushing_receiving_defense_description = html_join(
+        rank_description(
+          "This season",
+          c(pass_allowed_rank, completions_allowed_rank, rushing_allowed_rank),
+          c("passing yards allowed", "passing completions allowed", "rushing yards allowed")
+        ),
+        rank_description(
+          "Last season",
+          c(last_season_pass_allowed_rank, last_season_completions_allowed_rank,
+            last_season_rushing_allowed_rank),
+          c("passing yards allowed", "passing completions allowed", "rushing yards allowed")
+        )
+      ),
+      
+      rushing_receiving_matchup_description = ifelse(
+        is.na(times_played),
+        "No historical matchup data found",
+        paste0(
+          times_played,
+          ifelse(times_played == 1, " matchup", " matchups"),
+          " against this opponent (avg ",
+          text_join(
+            ifelse(is.na(avg_rushing_yards), "", paste0(round(avg_rushing_yards), " rushing yards")),
+            ifelse(is.na(avg_carries), "", paste0(round(avg_carries, 1), " carries")),
+            ifelse(is.na(avg_receiving_yards), "", paste0(round(avg_receiving_yards), " receiving yards")),
+            ifelse(is.na(avg_receptions), "", paste0(round(avg_receptions, 1), " receptions"))
+          ),
+          ")<br>",
+          "Most recent matchup: ", format_date_long(gameday), " - ",
+          text_join(
+            ifelse(is.na(rushing_yards), "", paste0(rushing_yards, " rushing yards")),
+            ifelse(is.na(receiving_yards), "", paste0(receiving_yards, " receiving yards"))
+          )
+        )
+      ),
+      
+      td_matchup_combined_description = ifelse(
+        is.na(times_played),
+        "No historical matchup data found",
+        paste0(
+          times_played,
+          ifelse(times_played == 1, " matchup", " matchups"),
+          " against this opponent (avg ",
+          round(avg_tds, 2), " touchdowns",
+          
+          case_when(
+            td_position_stat == "passing" & !is.na(avg_passing_yards) ~
+              paste0(
+                ", ", round(avg_passing_yards), " passing yards",
+                ifelse(
+                  is.na(avg_completion_rate),
+                  "",
+                  paste0(", ", round(100 * avg_completion_rate), "% completion rate")
+                )
+              ),
+            
+            td_position_stat == "rushing" & !is.na(avg_rushing_yards) ~
+              paste0(
+                ", ", round(avg_rushing_yards), " rushing yards",
+                ifelse(
+                  is.na(avg_carries),
+                  "",
+                  paste0(", ", round(avg_carries, 1), " carries")
+                )
+              ),
+            
+            td_position_stat == "receiving" & !is.na(avg_receiving_yards) ~
+              paste0(
+                ", ", round(avg_receiving_yards), " receiving yards",
+                ifelse(
+                  is.na(avg_receptions),
+                  "",
+                  paste0(", ", round(avg_receptions, 1), " receptions")
+                )
+              ),
+            
+            TRUE ~ ""
+          ),
+          
+          ")<br>",
+          "Most recent matchup: ", format_date_long(gameday),
+          " - ", tds,
+          ifelse(tds == 1, " touchdown", " touchdowns"),
+          
+          case_when(
+            td_position_stat == "passing" & !is.na(passing_yards) ~
+              paste0(", ", passing_yards, " passing yards"),
+            
+            td_position_stat == "rushing" & !is.na(rushing_yards) ~
+              paste0(", ", rushing_yards, " rushing yards"),
+            
+            td_position_stat == "receiving" & !is.na(receiving_yards) ~
+              paste0(", ", receiving_yards, " receiving yards"),
+            
+            TRUE ~ ""
+          )
+        )
       ),
       
       player_matchup_description = case_when(
@@ -1124,25 +1327,10 @@ pull_details = function(bets, bios, player_stats, team_stats, opp_stats, stats_s
           ),
         
         bet_category == "td" ~
-          html_join(
-            coalesce(
-              matchup_touchdown_description,
-              "No historical matchup data found"
-            ),
-            td_matchup_yardage_description
-          ),
+          td_matchup_combined_description,
         
         bet_category == "rushing_receiving" ~
-          html_join(
-            coalesce(
-              matchup_rushing_description,
-              "No historical matchup data found"
-            ),
-            coalesce(
-              matchup_receiving_description,
-              "No historical matchup data found"
-            )
-          ),
+          rushing_receiving_matchup_description,
         
         TRUE ~ ""
       ),
@@ -1205,19 +1393,10 @@ pull_details = function(bets, bios, player_stats, team_stats, opp_stats, stats_s
           ),
         
         bet_category == "td" ~
-          html_join(
-            td_defense_description,
-            last_season_td_defense_description,
-            td_position_defense_description
-          ),
+          td_combined_defense_description,
         
         bet_category == "rushing_receiving" ~
-          html_join(
-            pass_defense_description,
-            rush_defense_description,
-            last_season_pass_defense_description,
-            last_season_rush_defense_description
-          ),
+          rushing_receiving_defense_description,
         
         TRUE ~ ""
       ),

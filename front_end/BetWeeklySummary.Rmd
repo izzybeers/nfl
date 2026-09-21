@@ -1,5 +1,5 @@
 ---
-title: "Weekly Bet Cheat Sheet"
+title: ""
 output: html_document
 params:
   bet_table: null
@@ -16,7 +16,7 @@ knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
 ```
 
 
-```{r}
+```{r, results='asis'}
 library(dplyr)
 library(httr)
 library(rvest)
@@ -24,7 +24,8 @@ library(htmltools)
 library(lubridate)
 library(stringr)
 library(nflreadr)
-source('app_helper_funs.R')
+
+print(tags$title(paste(params$season, 'Week', params$week, 'Cheat Sheet')))
 
 ```
 
@@ -32,10 +33,15 @@ source('app_helper_funs.R')
 ```{r}
 bettors = unique(params$bet_table$Bettor)
 placed_bets = params$bet_table %>%
-  inner_join(params$bet_details %>% select(bet_display_name, depth_rank, jersey_number, position) %>% distinct(), join_by('Label' == 'bet_display_name'))
+  left_join(params$bet_details %>% select(label, depth_rank, jersey_number, position) %>% distinct(), join_by('BettingOn' == 'label'))
+
+if (!inherits(placed_bets$Gametime, "POSIXt")) {
+  placed_bets$Gametime = lubridate::ymd_hms(placed_bets$Gametime, tz = "UTC")
+}
+placed_bets$Gametime = lubridate::force_tz(placed_bets$Gametime, tzone = "America/New_York")
 
 placed_bets = placed_bets %>% mutate(Team = ifelse(Team == 'LA', 'LAR', Team), Opp = ifelse(Opp == 'LA','LAR',Opp)) %>%
-  filter(Gametime >= Sys.time() - 120*60) %>%
+  filter(Gametime >= lubridate::now(tzone = "America/New_York") - lubridate::hours(2)) %>%
   left_join(params$team_lookup_table %>% select(FullName, TV_abbr) %>% rename('TeamFullName' = 'FullName'), join_by('Team' == 'TV_abbr')) %>%
   left_join(params$team_lookup_table %>% select(FullName, TV_abbr) %>% rename('OppFullName' = 'FullName'), join_by('Opp' == 'TV_abbr')) %>%
   mutate(game = paste(pmin(TeamFullName, OppFullName), pmax(TeamFullName, OppFullName), sep = " - "))
@@ -72,6 +78,7 @@ if(length(params$survivor_teams) > 0)
 
 ```{r, results = 'asis'}
 
+
 for (t in games %>% arrange(posix_timestamp_game) %>% select(Timeslot) %>% distinct() %>% pull())
 {
   bets_this_timeslot = placed_bets %>% filter(Timeslot == t) %>% arrange(Team)
@@ -85,7 +92,7 @@ for (t in games %>% arrange(posix_timestamp_game) %>% select(Timeslot) %>% disti
   
   if((nrow(bets_this_timeslot) > 0) | (!is.null(survivors_this_timeslot) && nrow(survivors_this_timeslot) > 0)) #if there is at least one bet or survivor in this timeslot
   {
-    print(tags$h1(t)) #main heading for the timeslot
+    print(tags$h1(style = 'margin-top: 20px;', t)) #main heading for the timeslot
     
     for(g in unique(games %>% filter(Timeslot == t) %>% pull(game)))
     {
@@ -100,7 +107,8 @@ for (t in games %>% arrange(posix_timestamp_game) %>% select(Timeslot) %>% disti
       exist_bets = nrow(bets_this_game) > 0
       if (exist_survivors | exist_bets)
       {
-        print(tags$h4(g))
+        print(tags$h4(style ='margin-bottom:2px; margin-top: 30px;', g))
+        print(tags$p(style = 'margin-top: 0', sub("^0", "", format(unique(games$time_parsed[games$game == g])[1], "%I:%M %p"))))
         if(exist_survivors) #survivor section
         {
           for(s in 1:nrow(survivors_this_game))
@@ -113,8 +121,27 @@ for (t in games %>% arrange(posix_timestamp_game) %>% select(Timeslot) %>% disti
           players_this_game = bets_this_game %>% group_by(Label) %>% summarise(Bettors = paste(unique(Bettor), collapse = ","), TeamFullName = max(TeamFullName), Number = max(jersey_number), Position = max(position)) %>% arrange(TeamFullName)
           for(p in 1:nrow(players_this_game))
           {
-            print(tags$p(paste0(ifelse(length(bettors) > 1, paste0(players_this_game$Bettors[p], ": "), ''), players_this_game$Label[p], ' (', players_this_game$TeamFullName[p],', ', players_this_game$Position[p], ' #', players_this_game$Number[p], ')'))) 
-          }
+            print(
+              tags$div(style = "margin-left: 24px;",
+                           tags$p(
+                             tags$b(style = "font-size: 14px;",
+                               paste0(
+                                 ifelse(length(bettors) > 1,
+                                        paste0(players_this_game$Bettors[p], ": "),
+                                        ''),
+                                 players_this_game$Label[p]
+                                 )
+                               ),
+                             tags$span(style = "font-size: 12px;",
+                                       ifelse(
+                                         is.na(players_this_game$Position[p]), #team bets
+                                         '', #team bets
+                                         paste0(' (', players_this_game$TeamFullName[p],', ', players_this_game$Position[p], ' #', players_this_game$Number[p], ')'))  #player bets: position / jersey number details
+                                       )
+                             )
+                       )
+                  )
+            }
         }
       }
     }

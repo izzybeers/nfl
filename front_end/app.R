@@ -6,144 +6,259 @@ ui <- fluidPage(
   useShinyjs(),
   tags$head(
     tags$style(HTML("
-      #shiny-modal .modal-dialog.modal-lg {
-        width: 95vw !important;
-        max-width: none !important;
-        margin: 30px auto !important;
+        #shiny-modal .modal-dialog.modal-lg {
+          width: 95vw !important;
+          max-width: none !important;
+          margin: 30px auto !important;
+        }
+      details > summary {
+        display: list-item !important;
+        list-style-position: inside;
+        cursor: pointer;
       }
-    details > summary {
-      display: list-item !important;
-      list-style-position: inside;
-      cursor: pointer;
+      .navbar-brand {
+        display: none !important;
+      }
+    
+      .navbar-header {
+        width: 0 !important;
+        min-width: 0 !important;
+      }
+    
+      .navbar-collapse {
+        padding-left: 0 !important;
+      }
+    
+      .navbar-nav {
+        float: left !important;
+        margin-left: 0 !important;
+      }
+      #shiny-notification-panel {
+        position: fixed !important;
+        top: 560px !important;
+        left: 50% !important;
+        right: auto !important;
+        bottom: auto !important;
+        transform: translateX(-50%) !important;
+        width: 450px !important;
+        z-index: 99999 !important;
+      }
+    
+      #shiny-notification-panel .shiny-notification {
+        width: 100% !important;
+        font-size: 16px;
+      }
+      .home-cta {
+        background-color: #4b5563;
+        border-color: #4b5563;
+        color: white;
+        font-weight: 600;
+        border-radius: 6px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.12);
+        margin-top: 20px;
+        margin-bottom: 20px;
+      }
+      
+      .home-cta:hover,
+      .home-cta:focus {
+        background-color: #374151;
+        border-color: #374151;
+        color: white;
+      }
+      
+      .metric-card-container {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(140px, 1fr));
+      gap: 14px;
+      width: 100%;
     }
-    "))
+
+    .metric-card {
+      background-color: white;
+      border: 1px solid #d9d9d9;
+      border-radius: 10px;
+      padding: 18px 12px;
+      text-align: center;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    }
+
+    .metric-value {
+      font-size: 24px;
+      font-weight: 700;
+      color: #374151;
+      line-height: 1.2;
+    }
+
+    .metric-label {
+      margin-top: 6px;
+      font-size: 14px;
+      color: #6b7280;
+    }
+      "))
   ),
   tags$script(HTML("
-     document.addEventListener('DOMContentLoaded', function() {
-                    var tab = document.querySelector('#results_df')
-                     if(tab)
-                     {
-                        tab.addEventListener('click', function(e) {
-                        console.log('you clicked table')
-                        row = e.target.closest('tr')
-                        console.log(row)
-                        cells = row.querySelectorAll('td')
-                        console.log(cells)
-                        headers = tab.querySelectorAll('thead th') //column names
-                        headerNames = Array.from(headers).map(h=>h.innerText)//go through each header item and get the inner text of the header
-                        console.log(headerNames)
-                        var betIndex = headerNames.findIndex(h => h == 'bet_display_name')
-                        var betOddsIndex = headerNames.findIndex(h => h == 'Odds')
-                        betValue = cells[betIndex].innerText
-                        betOddsValue = cells[betOddsIndex].innerText
-                        console.log(betValue)
-                        console.log(betOddsValue)
-                        Shiny.setInputValue('click', {
-                          bet: betValue,
-                          odds: betOddsValue
-                        })
-                       })
-                     }
-     })
-                     ")),
+       document.addEventListener('click', function(e) {
+                      var tab = e.target.closest('#results_df')
+                       if(tab)
+                       {
+                          console.log('you clicked table')
+                          row = e.target.closest('tr')
+                          console.log(row)
+                          cells = row.querySelectorAll('td')
+                          console.log(cells)
+                          headers = tab.querySelectorAll('thead th') //column names
+                          headerNames = Array.from(headers).map(h=>h.innerText)//go through each header item and get the inner text of the header
+                          console.log(headerNames)
+                          var betIndex = headerNames.findIndex(h => h == 'bet_display_name')
+                          var betOddsIndex = headerNames.findIndex(h => h == 'Odds')
+                          betValue = cells[betIndex].innerText
+                          betOddsValue = cells[betOddsIndex].innerText
+                          console.log(betValue)
+                          console.log(betOddsValue)
+                          Shiny.setInputValue('click', {
+                            bet: betValue,
+                            odds: betOddsValue
+                          })
+                       }
+       })
+                       ")),
   
   tags$script(HTML("
-     document.addEventListener('DOMContentLoaded', function() {
-                    var tab = document.querySelector('#portfolio_optimization_output')
-                     if(tab)
-                     {
-                        tab.addEventListener('click', function(e) {
-                        console.log('you clicked portfolio optimization table')
-                        row = e.target.closest('tr')
-                        console.log(row)
-                        cells = row.querySelectorAll('td')
-                        console.log(cells)
-                        headers = tab.querySelectorAll('thead th') //column names
-                        headerNames = Array.from(headers).map(h=>h.innerText)//go through each header item and get the inner text of the header
-                        console.log(headerNames)
-                        rownameCell = row.querySelector('td').textContent
-                        var betAmountIndex = headerNames.findIndex(h => h == 'BetAmount')
-                        var toPayIndex = headerNames.findIndex(h => h == 'ToPay')
-                        var betAmountValue = cells[betAmountIndex].innerText
-                        var toPayValue = cells[toPayIndex].innerText
-                        Shiny.setInputValue('click_portfolio_row', {
-                          name: rownameCell,
-                          amount: betAmountValue,
-                          topay: toPayValue
-                        })
-                       })
-                     }
-     })
-                     ")),
-  
-  tabsetPanel(
-    tabPanel('Bet Recommendations',
-             uiOutput("error_message"),
-             tags$br(),
-             div(style = 'font-weight: bold; font-size: 16px;', textOutput("header")),
-             textOutput("header2"),
-             tags$br(),
-             # uiOutput("bet_size_ui"),
-             fluidRow(
-               column(4, uiOutput("type_filter_ui")),
-               column(4, uiOutput("timeslot_filter_ui")),
-               column(4, uiOutput("team_filter_ui"))
-               ),
-             uiOutput("odds_range_ui"),
-             tags$br(),
-             tags$br(),
-             uiOutput("instructions"),
-             tags$br(),
-             textOutput("weather_warning"),
-             tags$br(),
-             fluidRow(
-               column(6, uiOutput("popup_portfolio_button_ui")),
-               column(6,
-                       div(style = 'text-align:right',
-                           uiOutput("refresh"),
-                           div(id = 'refresh_message', textOutput("refreshing_message"))))
-             ),
-             tags$br(),
-             dataTableOutput('results_df') %>% withSpinner(),
-             tags$br(),
-             tags$br()
-    ),
-    tabPanel('Update Bet Results',
-             tags$br(),
-             uiOutput("refresh_bet_updates"),
-             div(id = 'refresh_bet_updates_message', textOutput("refreshing_bet_updates_message")),
-             uiOutput("bettor_selection_ui"),
-             tags$br(),
-             uiOutput("bet_radio_options") %>% withSpinner(),
-             tags$br(),
-             uiOutput("save_button")
-    ),
-    tabPanel('Upcoming Cheat Sheets',
-             uiOutput("bettor_choice_ui"),
-             uiOutput("survivor_teams_ui"),
-             uiOutput("cheat_sheet_button_ui")
-             ),
-    tabPanel('Bettor Summaries',
-             uiOutput("choose_bettor_summary_ui"),
-             uiOutput("summary_only_finished"),
-             tags$br(),
-             uiOutput("bettor_summary_header"),
-             tags$br(),
-             uiOutput("weekly_plot_ui"),
-             uiOutput("bet_type_plot_ui"),
-             uiOutput("portfolio_type_plot_ui"),
-             uiOutput("odds_range_plot_ui"),
-             tags$br(),
-             tags$br()
-    ),
-    tabPanel('Survivor Dashboard',
-             tags$br(),
-             uiOutput("survivor_filters"),
-             tags$br(),
-             tags$br(),
-             uiOutput("survivor_display")
+       document.addEventListener('DOMContentLoaded', function(e) {
+                      var tab = document.querySelector('#portfolio_optimization_output')
+                       if(tab)
+                       {
+                          tab.addEventListener('click', function(e) {
+                          console.log('you clicked portfolio optimization table')
+                          row = e.target.closest('tr')
+                          console.log(row)
+                          cells = row.querySelectorAll('td')
+                          console.log(cells)
+                          headers = tab.querySelectorAll('thead th') //column names
+                          headerNames = Array.from(headers).map(h=>h.innerText)//go through each header item and get the inner text of the header
+                          console.log(headerNames)
+                          rownameCell = row.querySelector('td').textContent
+                          var betAmountIndex = headerNames.findIndex(h => h == 'BetAmount')
+                          var toPayIndex = headerNames.findIndex(h => h == 'ToPay')
+                          var betAmountValue = cells[betAmountIndex].innerText
+                          var toPayValue = cells[toPayIndex].innerText
+                          Shiny.setInputValue('click_portfolio_row', {
+                            name: rownameCell,
+                            amount: betAmountValue,
+                            topay: toPayValue
+                          })
+                         })
+                       }
+       })
+  ")),
+  navbarPage(
+    title = NULL,
+    tabPanel('Get Recommendations',
+               tags$br(),
+               tags$h3(style = "font-weight: 600; margin-bottom: 16px; text-align:center;", 'Welcome to the NFL Bet Recommendations App!'),
+               tags$p(style = "font-size: 16px; color: #4b5563; margin-bottom: 8px; text-align:center;", 'To load bet recommendations and survivor pool choices, click the button below and wait for about 2-3 minutes.'),
+               tags$p(style = "font-size: 16px; color: #4b5563; margin-bottom: 20px; text-align:center;", 'To update results for completed bets, print cheat sheets, or view bettor performance, go to the Manage Bets page!'),
+               tags$br(),
+               actionButton('get_recs', 'Load Bet Recommendations',
+                            icon = icon("bolt"),
+                            class = "btn-primary home-cta"),
+               tags$br(),
+               tabsetPanel(
+                 tabPanel('Bet Recommendations',
+                          tags$br(),
+                          uiOutput("error_message"),
+                          tags$br(),
+                          div(style = 'font-weight: bold; font-size: 16px;', textOutput("header")),
+                          textOutput("header2"),
+                          tags$br(),
+                          # uiOutput("bet_size_ui"),
+                          fluidRow(
+                            column(4, uiOutput("type_filter_ui")),
+                            column(4, uiOutput("timeslot_filter_ui")),
+                            column(4, uiOutput("team_filter_ui"))
+                          ),
+                          uiOutput("odds_range_ui"),
+                          tags$br(),
+                          tags$br(),
+                          uiOutput("instructions"),
+                          tags$br(),
+                          textOutput("weather_warning"),
+                          tags$br(),
+                          fluidRow(
+                            column(6, uiOutput("popup_portfolio_button_ui")),
+                            column(6,
+                                   div(style = 'text-align:right',
+                                       uiOutput("refresh"),
+                                       div(id = 'refresh_message', textOutput("refreshing_message"))))
+                          ),
+                          tags$br(),
+                          conditionalPanel(
+                            condition = "input.get_recs > 0",
+                            dataTableOutput("results_df") %>%
+                              withSpinner(
+                                type = 6,
+                                size = 1,
+                                proxy.height = "250px"
+                              )
+                          ),
+                          tags$br(),
+                          tags$br()
+                 ),
+                 tabPanel('Survivor Pool Dashboard',
+                          tags$br(),
+                          tags$h4('The survivor pool dashboard shows you everything you need all in one place:', tags$b('top spreads, game/matchup info, and upcoming opponents!')),
+                          tags$br(),
+                          uiOutput("survivor_filters"),
+                          tags$br(),
+                          uiOutput("survivor_week_ui"),
+                          tags$br(),
+                          tags$br(),
+                          uiOutput("survivor_display"),
+                          tags$br(),
+                          tags$br()
+                 )
+               )
+      ),
+      tabPanel('Manage Bets',
+               tabsetPanel(
+                tabPanel('Bettor Performance Summaries',
+                         tags$br(),
+                         uiOutput("choose_bettor_summary_ui"),
+                         uiOutput("summary_only_finished"),
+                         tags$br(),
+                         uiOutput("bettor_summary_header"),
+                         tags$br(),
+                         uiOutput("weekly_plot_ui"),
+                         uiOutput("bet_type_plot_ui"),
+                         uiOutput("portfolio_type_plot_ui"),
+                         uiOutput("odds_range_plot_ui"),
+                         tags$br(),
+                         tags$br()
+                ),
+                tabPanel('Update Bet Results',
+                         tags$br(),
+                         tags$h3("Update results for completed bets below. To place a new bet, click on a recommendation from the main table or a portfolio, on the Get Recommendations page."),
+                         tags$br(),
+                         uiOutput("refresh_bet_updates"),
+                         div(id = 'refresh_bet_updates_message', textOutput("refreshing_bet_updates_message")),
+                         tags$br(),
+                         uiOutput("bettor_selection_ui"),
+                         tags$br(),
+                         uiOutput("bet_radio_options") %>% withSpinner(),
+                         tags$br(),
+                         uiOutput("save_button")
+                ),
+                tabPanel('Upcoming Cheat Sheets',
+                         tags$br(),
+                         tags$h3("Download a cheat sheet to help follow bets per game, with additional details including player positions and jersey numbers."),
+                         tags$br(),
+                         uiOutput("bettor_choice_ui"),
+                         uiOutput("survivor_teams_ui"),
+                         uiOutput("cheat_sheet_button_ui")
+                         )
+               )
+      )
     )
-  )
 )
 
 server = function(input, output, session) {
@@ -153,60 +268,124 @@ server = function(input, output, session) {
   # gids = c(passing_gid, rushing_gid, receiving_gid, touchdown_gid)
   # responses = list(passing_response, rushing_response, receiving_response, touchdown_response)
   
-  predictions_res = pull_prediction_data()
-  player_preds = predictions_res[[1]]
-  team_preds = predictions_res[[2]]
-  
-  latest_season = max(player_preds$season)
-  latest_week = max(player_preds$Week[player_preds$season == latest_season])
-  
-  latest_player_update_time = max(player_preds$updated_at)
-  latest_team_update_time = max(team_preds$updated_at)
-  latest_update_time = max(latest_player_update_time, latest_team_update_time)
-  
-  player_preds = player_preds %>% filter(season == latest_season, Week == latest_week, updated_at == latest_player_update_time)
-  team_preds = team_preds %>% filter(season == latest_season, Week == latest_week, updated_at == latest_team_update_time)
-  
-  player_info = get_supabase_data('MainData', 'PlayerBios', additional_sql = list(season = paste0('eq.', latest_season), week = paste0('eq.',latest_week)))
-  player_historical_stats = get_supabase_data('MainData', 'OffensePlayerStats') %>% filter(gsis_id %in% player_preds$gsis_id)
-  #player_historical_stats = get_supabase_data('MainData', 'OffensePlayerStats', additional_sql = list(gsis_id = paste0("in.(", paste(unique(na.omit(player_preds$gsis_id)), collapse = ","), ")")))
-  team_historical_stats = get_supabase_data('MainData', 'TeamStats')
-  opp_historical_stats = get_supabase_data('MainData', 'OppStats')
-  
-  previous_recs = get_supabase_data('betting', 'BetRecommendations',additional_sql = list(Season = paste0('eq.',latest_season)))
-  if(!is.null(previous_recs) && nrow(previous_recs) > 0)
+  t_start = Sys.time()
+  t1 = Sys.time()
+  get_latest_prediction_period = function()
   {
-    most_recent_save = reactiveVal(
-      max(as.POSIXct(previous_recs$run_time, format = "%Y-%m-%d %I:%M %p"))
-    )
-  } else {
-    most_recent_save = reactiveVal(NULL)
+    response = GET(paste0(SUPABASE_URL, "/rest/v1/PlayerPredictions"), query = list(select = "season,Week", order = "season.desc,Week.desc", limit = 1),
+      add_headers("apikey" = SUPABASE_KEY, "Authorization" = paste("Bearer", SUPABASE_KEY), "Accept-Profile" = "predictions"))
+    if (http_error(response))
+    {
+      stop(content(response, "text", encoding = "UTF-8"))
+    }
+    fromJSON(content(response, "text", encoding = "UTF-8"))
+    #get_supabase_data('predictions','PlayerPredictions', additional_sql = list(select = "season,Week", order = "season.desc,Week.desc", limit = 1))
   }
+  latest_period = get_latest_prediction_period()
+  latest_season = latest_period$season[1]
+  latest_week = latest_period$Week[1]
   
-  # extra_passing_info = extra_passing_info %>% filter(Week == latest_week) %>% left_join(depth_charts %>% select(player_id, Depth), join_by('player_id'))
-  # extra_rushing_info = extra_rushing_info %>% filter(Week == latest_week) %>% left_join(depth_charts %>% select(player_id, Depth), join_by('player_id'))
-  # extra_receiving_info = extra_receiving_info %>% filter(Week == latest_week) %>% left_join(depth_charts %>% select(player_id, Depth), join_by('player_id'))
-  # extra_touchdown_info = extra_touchdown_info %>% filter(Week == latest_week) %>% left_join(depth_charts %>% select(player_id, Depth), join_by('player_id'))
-  # 
+  t1 = Sys.time()
+  print('Getting player bios...')
+  player_info = get_supabase_data('MainData', 'PlayerBios', additional_sql = list(season = paste0('eq.', latest_season), week = paste0('eq.',latest_week)))
+  print(Sys.time() - t1)
   
+  player_preds = NULL
+  team_preds = NULL
+  latest_update_time = NULL
+  player_historical_stats = NULL
+  team_historical_stats = NULL
+  opp_historical_stats = NULL
   results = reactiveVal(NULL) #initialize
-  combined_data = join_preds_and_props(player_preds, team_preds)
-
-  if (is.null(combined_data) || nrow(combined_data) == 0) {
-    output$error_message <- renderUI(HTML(
-      '<div style="color:red; font-size:24px; font-weight:bold;">
-       Betting lines could not be pulled. If you are on public WiFi, try a hotspot.
-     </div>'
-    ))
-  } else {
-    output$error_message <- renderUI(NULL)
-    results(combined_data) 
-  }
-  results(combined_data)
+  bet_details = reactiveVal(NULL)
+  most_recent_save = reactiveVal(NULL)
+  current_spread_lines = reactiveVal(NULL)
   
-  #bet_details = pull_details(results(), player_info, player_historical_stats, team_historical_stats, opp_historical_stats)
-  bet_details = reactive(pull_details(results(), player_info, player_historical_stats, team_historical_stats, opp_historical_stats, stats_season = latest_season))
-
+  observeEvent(input$get_recs, {
+    
+    progress = Progress$new(session, min = 0, max = 1)
+    on.exit(progress$close(), add = TRUE)
+    progress$set(value = 0, 'Pulling prediction data...')
+    print('Pulling predictions...')
+    predictions_res = pull_prediction_data(latest_season, latest_week)
+    player_preds <<- predictions_res[[1]]
+    team_preds <<- predictions_res[[2]]
+    
+    latest_player_update_time = max(player_preds$updated_at)
+    latest_team_update_time = max(team_preds$updated_at)
+    latest_update_time <<- max(latest_player_update_time, latest_team_update_time)
+  
+    player_preds <<- player_preds %>% filter(season == latest_season, Week == latest_week, updated_at == latest_player_update_time)
+    team_preds <<- team_preds %>% filter(season == latest_season, Week == latest_week, updated_at == latest_team_update_time)
+    print(Sys.time() - t1)
+    
+    progress$set(value = 0.2, 'Pulling historical player stats...')
+    t1 = Sys.time()
+    print('Getting player stats...')
+    player_historical_stats <<- get_supabase_data('MainData', 'OffensePlayerStats') %>% filter(gsis_id %in% player_preds$gsis_id)
+    print(Sys.time() - t1)
+    
+    progress$set(value = 0.4, 'Pulling historical team stats...')
+    t1 = Sys.time()
+    print('Getting team stats...')
+    team_historical_stats <<- get_supabase_data('MainData', 'TeamStats')
+    print(Sys.time() - t1)
+    
+    progress$set(value = 0.5, 'Pulling historical opponent stats...')
+    t1 = Sys.time()
+    print('Getting opp stats...')
+    opp_historical_stats <<- get_supabase_data('MainData', 'OppStats')
+    print(Sys.time() - t1)
+    
+    t1 = Sys.time()
+    print('Getting previous bet recommendations...')
+    previous_recs = get_supabase_data('betting', 'BetRecommendations',additional_sql = list(Season = paste0('eq.',latest_season)))
+    if(!is.null(previous_recs) && nrow(previous_recs) > 0)
+    {
+      most_recent_save(max(as.POSIXct(previous_recs$run_time, format = "%Y-%m-%d %I:%M %p")))
+    } else {
+      most_recent_save(NULL)
+    }
+    print(Sys.time() - t1)
+    
+    progress$set(value = 0.6, 'Pulling DraftKings betting lines...')
+    t1 = Sys.time()
+    print('Joining preds and props...')
+    combined_data = join_preds_and_props(player_preds, team_preds)
+    print(Sys.time() - t1)
+    
+    progress$set(value = 1, 'Completed')
+  
+    if (is.null(combined_data) || nrow(combined_data) == 0) {
+      output$error_message <- renderUI(HTML(
+        '<div style="color:red; font-size:24px; font-weight:bold;">
+         Betting lines could not be pulled. If you are on public WiFi, try a hotspot.
+       </div>'
+      ))
+      results(NULL)
+    } else {
+      output$error_message <- renderUI(NULL)
+      results(combined_data) 
+    }
+  })
+  
+  observe({
+    req(results())
+    req(nrow(results()) > 0)
+    bet_details(pull_details(results(), player_info, player_historical_stats, team_historical_stats, opp_historical_stats, stats_season = latest_season))
+    spreads = get_spreads(latest_season)
+    spreads_with_bets = spreads %>%
+      left_join(team_preds %>% select(-gameday, -opponent_team, -game_location) %>% filter(response_var == 'team_win') %>% mutate(team = ifelse(team == 'LA','LAR',team)), join_by('team', 'week' == 'Week')) %>%
+      mutate(match_name = paste(label, 'Moneyline')) %>%
+      left_join(bet_details() %>% mutate(week = latest_week) %>% filter(str_detect(bet_display_name, 'Moneyline')), join_by('match_name' == 'bet_display_name', 'week')) %>%
+      left_join(team_lookup %>% select(TV_abbr, FullName) %>% rename('OppFullName' = 'FullName'), join_by('opponent' == 'TV_abbr')) %>%
+      select(week, label, points, team, opponent, OppFullName, Model_Probability, timeslot, game_location, extra_info) %>% arrange(week, points)
+    current_spread_lines(spreads_with_bets)
+  })
+  
+  
+  
+  
   output$header = renderText({
     req(results())
     paste(latest_season, 'Week', latest_week)
@@ -221,7 +400,7 @@ server = function(input, output, session) {
     actionButton('refresh', NULL, icon = icon("rotate"), title = 'Refresh Betting Lines')
     })
   output$refreshing_message = renderText("Refreshing...")
-  output$refresh_bet_updates = renderUI(actionButton('refresh_bet_updates', 'Refresh'))
+  output$refresh_bet_updates = renderUI(actionButton('refresh_bet_updates', NULL, icon = icon("rotate")))
   output$refreshing_bet_updates_message = renderText("Refreshing...")
   
   observeEvent(input$refresh, {
@@ -240,10 +419,12 @@ server = function(input, output, session) {
     req(results())
     pickerInput(inputId = 'bet_type_filter', label = "Filter on bet type", choices = unique(results()$bet_type), multiple = TRUE)
   })
+  
   output$timeslot_filter_ui = renderUI({
     req(results())
     pickerInput(inputId = 'timeslot_filter', label = "Filter on timeslot", choices = unique(results()$timeslot), multiple = TRUE)
   })
+  
   output$team_filter_ui = renderUI({
     req(results())
     res = results() %>% inner_join(team_lookup %>% select(TV_abbr, FullName), join_by('team' == 'TV_abbr')) %>% select(team, FullName) %>% distinct() %>% arrange(FullName)
@@ -288,11 +469,20 @@ server = function(input, output, session) {
       res = res %>% filter(as.numeric(Odds)  <= input$odds_cap)
     }
     
+    
+    req(nrow(res) > 0)
+    
+    t1 = Sys.time()
+    print('Calling API to get EVs...')
+    
     bets_with_evs = request(paste0(api_base_url, 'get_bets_with_ev')) %>%
       req_body_json(list(season = latest_season, data = as.list(res %>% select(response_var, Week, label, Odds, Model_Probability, Position, team, opponent_team, bet_display_name, Betting_Line_Implied_Prob, bet_type, timeslot, game_location, posix_timestamp)))) %>%
       req_perform() %>%
       resp_body_json(simplifyVector = TRUE) %>%
       as.data.frame()
+    print(Sys.time() - t1)
+    
+    return(bets_with_evs)
 
   })
   
@@ -305,9 +495,11 @@ server = function(input, output, session) {
     req(results_filtered())
     req(nrow(results_filtered()) > 0)
     results = results_filtered() %>% 
-      mutate(Return = round(EVProfitPer100,2), Risk_Score = round(Risk_Score, 2)) %>%
+      mutate(Return = EVProfitPer100, Risk_Score = round(Risk_Score, 2)) %>%
       rename('expected_return_profit_per_100' = 'Return') %>% 
+      mutate(expected_weighted_roi = expected_return_profit_per_100/100) %>%
       arrange(desc(expected_return_profit_per_100)) %>%
+      mutate(Payout_10_Dollar_Bet = 10 + ProfitPer100/10) %>%
       select(-ProfitPer100) %>%
       mutate(run_time = format(force_tz(Sys.time(), "America/New_York"), "%Y-%m-%d %I:%M %p"))
 
@@ -317,6 +509,7 @@ server = function(input, output, session) {
         write_to_supabase('betting', 'BetRecommendations',
                           results %>%
                             mutate(Week = latest_week, Season = latest_season) %>%
+                            select(-Payout_10_Dollar_Bet, -expected_return) %>%
                             rename('BettingOn' = 'label',
                                    'Bet_Type' = 'bet_type',
                                    'Label' = 'bet_display_name',
@@ -341,16 +534,18 @@ server = function(input, output, session) {
     shinyjs::hide("refresh_message")
 
     
-    results %>% select(bet_display_name, Position, team, opponent_team, game_location, timeslot, Odds, Model_Probability, Betting_Line_Implied_Prob, expected_return_profit_per_100, Risk_Score)  %>%
+    results %>% 
+      select(bet_display_name, Position, team, opponent_team, game_location, timeslot, Odds, Model_Probability, Betting_Line_Implied_Prob, Payout_10_Dollar_Bet, expected_weighted_roi, Risk_Score) %>%
         datatable(options = list(dom = 'ftp'), rownames = FALSE) %>%
-      formatPercentage(c('Model_Probability', 'Betting_Line_Implied_Prob'), digits = 1)
+      formatPercentage(c('Model_Probability', 'Betting_Line_Implied_Prob', 'expected_weighted_roi'), digits = 1)
   })
   
   output$popup_portfolio_button_ui = renderUI({
     req(results_filtered())
     req(nrow(results_filtered()) > 0)
-    actionButton('popup_portfolio_button', 'Create a Diversified Bet Portfolio For Me')
-    })
+    actionButton('popup_portfolio_button', 'Create a Diversified Bet Portfolio For Me'
+    )
+  })
   
   observeEvent(input$popup_portfolio_button, {
     showModal(modalDialog(
@@ -368,7 +563,11 @@ server = function(input, output, session) {
         column(4, numericInput("min_stake", "Minimum Stake ($) Per Bet", min = 0, max = NA, step = 0.1, value = 0.5))
       ),
       pickerInput("sd_cap", "Risk Tolerance", choices = c('Less Aggressive' = 1.5, 'Moderate' = 2, 'More Aggressive' = 3)),
-      actionButton('generate_portfolio', 'Generate Portfolio'),
+      actionButton('generate_portfolio', 'Generate Portfolio', onclick = "document.getElementById('portfolio_loading').style.display = 'block';"),
+      tags$br(),
+      tags$div(
+        id = "portfolio_loading", style = "display:none; margin-top:15px;", icon("spinner", class = "fa-spin"),
+        tags$span( style = "margin-left:8px;", "Creating portfolio...")),
       tags$br(),
       uiOutput("portfolio_stats"),
       uiOutput("portfolio_view_radio"),
@@ -384,6 +583,18 @@ server = function(input, output, session) {
   
   portfolios_reactive = reactiveVal(NULL)
   
+  observeEvent(input$team_filter, {
+    portfolios_reactive(NULL)
+  })
+  observeEvent(input$bet_type_filter, {
+    portfolios_reactive(NULL)
+  })
+  observeEvent(input$timeslot_filter, {
+    portfolios_reactive(NULL)
+  })
+  observeEvent(input$odds_cap, {
+    portfolios_reactive(NULL)
+  })
   observeEvent(input$portfolio_num_bets, {
     portfolios_reactive(NULL)
   })
@@ -405,15 +616,16 @@ observeEvent(input$generate_portfolio, {
   table_to_pass = results_filtered() %>%
     select(bet_display_name, response_var, Week, label, Odds, Model_Probability, Position, team, opponent_team, EVProfitPer100, Risk_Score, Type)
   portfolios = request(paste0(api_base_url, 'get_portfolio')) %>%
-    req_body_json(list(season = latest_season, data = as.list(table_to_pass),
-                       max_bets = input$portfolio_num_bets,
-                       total_amount = input$portfolio_bet_amount,
-                       sd_cap = as.numeric(input$sd_cap),
-                       min_stake = input$min_stake)) %>%
-    req_perform() %>%
-    resp_body_json(simplifyVector = TRUE) %>%
-    as.data.frame()
+        req_body_json(list(season = latest_season, data = as.list(table_to_pass),
+                           max_bets = input$portfolio_num_bets,
+                           total_amount = input$portfolio_bet_amount,
+                           sd_cap = as.numeric(input$sd_cap),
+                           min_stake = input$min_stake)) %>%
+        req_perform() %>%
+        resp_body_json(simplifyVector = TRUE) %>%
+        as.data.frame()
   portfolios_reactive(portfolios)
+  shinyjs::hide("portfolio_loading")
   write_to_supabase('betting', 'BetPortfolioRecommendations', 
                     portfolios_reactive() %>%
                       rename('Bet' = 'bet_display_name',
@@ -430,11 +642,14 @@ observeEvent(input$generate_portfolio, {
                              updateTime = Sys.time()) %>%
                       select(Season, Week, PortfolioID, BetID, NumBets, Bet, Weight, Odds, Gamma, Mu, Var, SD, Sharpe, updateTime))
   
-  output$portfolio_stats = renderUI(tagList(
-    p(paste0("Portfolio Expected Value Return: ", 100*round(max(portfolios_reactive()$Portfolio_Mu),3),'%')),
-    p(paste('Portfolio Variance:', round(max(portfolios_reactive()$Portfolio_Var),2))),
-    p(paste('Portfolio SD:', round(max(portfolios_reactive()$Portfolio_SD),2)))
-  ))
+  output$portfolio_stats = renderUI({
+    req(portfolios_reactive())
+    tagList(
+      p(paste0("Portfolio Expected Value Return: ", 100*round(max(portfolios_reactive()$Portfolio_Mu),3),'%')),
+      p(paste('Portfolio Variance:', round(max(portfolios_reactive()$Portfolio_Var),2))),
+      p(paste('Portfolio SD:', round(max(portfolios_reactive()$Portfolio_SD),2)))
+    )
+    })
   
   output$portfolio_view_radio = renderUI({
     req(portfolios_reactive())
@@ -444,10 +659,10 @@ observeEvent(input$generate_portfolio, {
   portfolio_table_to_show = reactive({
     req(portfolios_reactive())
     req(!is.null(input$portfolio_view))
-    table_to_show = portfolios_reactive() %>% left_join(results_filtered() %>% select(bet_display_name, timeslot, game_location, Betting_Line_Implied_Prob, posix_timestamp), join_by('bet_display_name')) %>%
-      select(bet_display_name, Position, bet_amount, team, opponent_team, game_location, timeslot, Odds, Model_Probability, Betting_Line_Implied_Prob, posix_timestamp, Type) %>%
+    table_to_show = portfolios_reactive() %>% left_join(results_filtered() %>% select(bet_display_name, timeslot, game_location, Betting_Line_Implied_Prob, posix_timestamp), join_by('bet_display_name'))  %>%
+      mutate(ToPay = ifelse(Odds > 0, bet_amount+(bet_amount*Odds)/100, bet_amount + (100*bet_amount/(-1*Odds)))) %>%
+      select(bet_display_name, Position, bet_amount, ToPay, team, opponent_team, game_location, timeslot, Odds, Model_Probability, Betting_Line_Implied_Prob, posix_timestamp, Type) %>%
       arrange(desc(bet_amount))
-    
     if(input$portfolio_view)
     {
       table_to_show = table_to_show %>% select(-posix_timestamp, -Type) %>% arrange(desc(bet_amount))
@@ -469,8 +684,9 @@ observeEvent(input$generate_portfolio, {
   output$portfolio_df = renderDataTable({
     req(portfolio_table_to_show())
     
-    portfolio_table_to_show() %>% datatable(options = list(dom = 'tp'), rownames = FALSE, selection = 'single') %>%
-      formatCurrency('bet_amount', digits = 2) %>%
+    portfolio_table_to_show() %>% datatable(options = list(dom = 't',
+                                                           pageLength = nrow(portfolio_table_to_show())), rownames = FALSE, selection = 'single') %>%
+      formatCurrency(c('bet_amount', 'ToPay'), digits = 2) %>%
       formatPercentage(c('Model_Probability', 'Betting_Line_Implied_Prob'), digits = 1)
   })
   
@@ -485,6 +701,7 @@ observeEvent(input$generate_portfolio, {
     
     row_selected = portfolio_table_to_show()[input$portfolio_df_rows_selected,]
     details_this_bet = bet_details() %>% filter(bet_display_name == row_selected$bet_display_name)
+    details_this_bet$extra_info = gsub('<b>\\$10 Bet Payout: </b>\\$[0-9]+\\.[0-9]+', paste0('<b>\\$', round(row_selected$bet_amount,2), ' Bet Payout: </b>\\$', round(row_selected$ToPay,2)), details_this_bet$extra_info)
     
     req(nrow(details_this_bet) > 0)
     
@@ -541,11 +758,12 @@ for (i in 1:nrow(portfolios_reactive()))
   portfolio_bet_amounts = c(portfolio_bet_amounts, input[[paste0('portfolio_bet_amt_',i)]])
   portfolio_bet_odds = c(portfolio_bet_odds, input[[paste0('portfolio_bet_odds_',i)]])
 }
-bets_to_write = portfolios_reactive() %>% left_join(results_filtered() %>% select(bet_display_name, bet_type, timeslot, posix_timestamp), join_by('bet_display_name'))
+  bets_to_write = portfolios_reactive() %>% left_join(results_filtered() %>% select(bet_display_name, bet_type, timeslot, posix_timestamp), join_by('bet_display_name'))
   bets_to_write$Amount = portfolio_bet_amounts
   bets_to_write$Odds = portfolio_bet_odds
   bets_to_write = bets_to_write %>% 
-    filter(Amount > 0) %>%
+    filter(Amount > 0)
+  bets_to_write = bets_to_write %>%
     mutate(
       id = sample(1:1000000000, nrow(bets_to_write)) %>% as.character(),
       Season = latest_season,
@@ -553,6 +771,7 @@ bets_to_write = portfolios_reactive() %>% left_join(results_filtered() %>% selec
       Bettor = input$optimization_bettor_name,
       Time_Submitted = format(force_tz(Sys.time(), "America/New_York"), "%Y-%m-%d %I:%M %p"),
       updated_at = Time_Submitted,
+      # gsis_id = ifelse()
       Notes = NA) %>%
     rename(
       'BettingOn' = 'label',
@@ -569,6 +788,17 @@ bets_to_write = portfolios_reactive() %>% left_join(results_filtered() %>% selec
     ) %>% mutate(Type = 'Optimization Recommender') %>% select(id, Season, Week, Bettor, Bet_Type, Label, Odds, Amount, Time_Submitted, Type, Mu_Port, SD_Port, Sharpe_Port, Team, Opp, Gametime, Timeslot, BettingOn, PortfolioID)
   
   write_to_supabase('betting', 'BetsPlaced', bets_to_write)
+  
+  showNotification(
+    paste0(
+      nrow(bets_to_write),
+      ifelse(nrow(bets_to_write) == 1, " bet", " bets"),
+      " successfully logged."
+    ),
+    type = "message",
+    duration = 5
+  )
+  placed_bets(get_supabase_data('betting', 'BetsPlaced') %>% filter(Season == latest_season))
 })
   
   observeEvent(input$click, {
@@ -623,15 +853,26 @@ bets_to_write = portfolios_reactive() %>% left_join(results_filtered() %>% selec
       ) %>% select(id, Season, Week, Bettor, Bet_Type, Label, Odds, Amount, Time_Submitted, Type, Team, Opp, Gametime, Timeslot, BettingOn)
     
     write_to_supabase('betting', 'BetsPlaced', row_to_write)
+    showNotification("Bet successfully logged.", type = "message", duration = 5)
+    placed_bets(get_supabase_data('betting', 'BetsPlaced') %>% filter(Season == latest_season))
     
   })
   
   
   placed_bets = reactiveVal(get_supabase_data('betting', 'BetsPlaced') %>% filter(Season == latest_season))
-  unsettled_bets = reactive({ placed_bets() %>% filter(is.na(Result)) %>% mutate(bet_descriptions = paste(Bettor, 'Week', Week, '-', Label)) })
+  unsettled_bets = reactive({
+    req(placed_bets())
+    if(nrow(placed_bets()) > 0)
+    {
+      placed_bets() %>% filter(is.na(Result), Gametime < (Sys.time() - 3*3600)) %>% mutate(bet_descriptions = paste(Bettor, 'Week', Week, '-', Label)) 
+    } else {
+      return(NULL)
+    }
+  })
   
   output$bettor_selection_ui = renderUI({
-    pickerInput(inputId = 'bettor_selection', label = 'Filter on bettor name', choices = unique(unsettled_bets()$Bettor), multiple = TRUE, selected = NULL)
+    checkboxGroupInput(inputId = 'bettor_selection', label = 'Filter on bettor name', inline = TRUE,
+                 choices = unique(unsettled_bets()$Bettor), selected = unique(unsettled_bets()$Bettor[!str_detect(unsettled_bets()$Bettor, 'Test')]))
   })
   
   unspecified_bets_filtered = reactive({
@@ -640,7 +881,7 @@ bets_to_write = portfolios_reactive() %>% left_join(results_filtered() %>% selec
     {
       unsettled_bets() %>% filter(Bettor %in% input$bettor_selection)
     } else {
-      unsettled_bets()
+      NULL
     }
   })
   
@@ -658,7 +899,7 @@ bets_to_write = portfolios_reactive() %>% left_join(results_filtered() %>% selec
   
   
   output$bet_radio_options = renderUI({
-    if(nrow(unspecified_bets_filtered()) > 0)
+    if(!is.null(unspecified_bets_filtered()) && nrow(unspecified_bets_filtered()) > 0)
     {
       radio_list = lapply(1:nrow(unspecified_bets_filtered()), function(i) {
         description = unspecified_bets_filtered()$bet_descriptions[i]
@@ -674,7 +915,7 @@ bets_to_write = portfolios_reactive() %>% left_join(results_filtered() %>% selec
       })
     tagList(radio_list)
   } else {
-    tags$p("No outstanding bets available to update.")
+    tags$p("No outstanding bets available to update for the selected players.")
   }
   })
   
@@ -705,11 +946,15 @@ bets_to_write = portfolios_reactive() %>% left_join(results_filtered() %>% selec
 
    
    #CHEAT SHEETS
-  current_week_bets = reactive(placed_bets() %>% filter(Week == latest_week & Season == latest_season)  %>% select(id, Bettor, Season, Week, Bet_Type, Label, Team, Opp, Gametime, Timeslot))
+  current_week_bets = reactive({
+    req(placed_bets())
+    placed_bets() %>% filter(Week == latest_week & Season == latest_season)  %>% select(id, Bettor, Season, Week, Bet_Type, BettingOn, Label, Team, Opp, Gametime, Timeslot)
+  })
 
   output$bettor_choice_ui = renderUI({
     req(current_week_bets())
-    pickerInput(inputId = 'cheat_sheet_bettors', label = 'Choose bettors to view on cheat sheet', choices = sort(unique(current_week_bets()$Bettor)), multiple = TRUE)
+    pickerInput(inputId = 'cheat_sheet_bettors', label = 'Choose bettors to view on cheat sheet',
+                choices = sort(unique(current_week_bets()$Bettor)), multiple = TRUE)
   })
   
   bets_for_rmd = reactive({
@@ -732,10 +977,17 @@ bets_to_write = portfolios_reactive() %>% left_join(results_filtered() %>% selec
       paste0('Week', latest_week, 'CheatSheet.html')
     },
     content = function(file) {
+      paste(lubridate::now(tzone = "America/New_York") - lubridate::hours(2))
+      # print(bet_table %>%
+      #         left_join(bet_details %>% select(label, depth_rank, jersey_number, position) %>% distinct(), join_by('BettingOn' == 'label'))
+      #       
+      #       placed_bets = placed_bets %>% mutate(Team = ifelse(Team == 'LA', 'LAR', Team), Opp = ifelse(Opp == 'LA','LAR',Opp)) %>%
+      #         filter(Gametime >= Sys.time() - 120*60))
       params = list(
         bet_table =  bets_for_rmd(),
         survivor_teams = input$survivor_teams,
-        bet_details = bet_details() %>% filter(bet_display_name %in% bets_for_rmd()$Label),
+        bet_details = player_info %>%
+          mutate(label = clean_names(display_name)) %>% filter(label %in% bets_for_rmd()$BettingOn) %>% select(label, depth_rank, jersey_number, position),
         team_lookup_table = team_lookup,
         season = latest_season,
         week = latest_week
@@ -758,11 +1010,15 @@ bets_to_write = portfolios_reactive() %>% left_join(results_filtered() %>% selec
   )
  
   output$choose_bettor_summary_ui = renderUI({
-    pickerInput(inputId = 'summary_bettors', label = 'Choose bettors to view summaries', choices = sort(unique(placed_bets()$Bettor)), multiple = TRUE)
+    req(placed_bets())
+    pickerInput(inputId = 'summary_bettors', label = 'Choose bettors to view summaries',
+                choices = sort(unique(placed_bets()$Bettor)),
+                selected = unique(placed_bets()$Bettor[!str_detect(placed_bets()$Bettor, 'Test')]),
+                multiple = TRUE)
   })
 
   output$summary_only_finished = renderUI({
-    checkboxInput(inputId = 'summary_finished', label = "Do not include unfinished bets", value = FALSE)
+    checkboxInput(inputId = 'summary_finished', label = "Do not include unfinished bets", value = TRUE)
   })
 
   bet_summary_filtered = reactive({
@@ -779,7 +1035,7 @@ bets_to_write = portfolios_reactive() %>% left_join(results_filtered() %>% selec
 
   output$bettor_summary_header = renderUI({
     req(bet_summary_filtered())
-    df = bet_summary_filtered() %>% filter(!is.na(Result))
+    df = bet_summary_filtered() %>% filter(!is.na(Result) & Result != 'Refund')
     req(nrow(df) > 0)
     
     total_bet = sum(df$Amount, na.rm = TRUE)
@@ -788,18 +1044,26 @@ bets_to_write = portfolios_reactive() %>% left_join(results_filtered() %>% selec
     total_return_pct = ifelse(total_bet == 0, NA, total_return / total_bet)
     win_rate = mean(df$Result == "Win", na.rm = TRUE)
     
+    metric_card = function(value, label) {
+      tags$div(
+        class = "metric-card",
+        tags$div(class = "metric-value", value),
+        tags$div(class = "metric-label", label)
+      )
+    }
     tags$div(
       style = "border:1px solid #d9d9d9; border-radius:10px; padding:16px 18px; margin-bottom:18px; background-color:#fafafa;",
-      tags$h3(style = "margin-top:0; margin-bottom:10px;", "Bettor Summary"),
-      HTML(paste0(
-        "<b>Bettors:</b> ", paste(sort(unique(df$Bettor)), collapse = ", "), "<br>",
-        "<b>Completed Bets:</b> ", nrow(df), "<br>",
-        "<b>Win Rate:</b> ", round(100 * win_rate, 1), "%<br>",
-        "<b>Total Bet:</b> $", formatC(total_bet, format = "f", digits = 2, big.mark = ","), "<br>",
-        "<b>Total Payout:</b> $", formatC(total_payout, format = "f", digits = 2, big.mark = ","), "<br>",
-        "<b>Total Return:</b> $", formatC(total_return, format = "f", digits = 2, big.mark = ","), 
-        " (", round(100 * total_return_pct, 1), "%)"
-      ))
+      tags$h2(style = "margin-top:0; margin-bottom:10px;", "Bettor Summary"),
+      tags$h3(style = 'text-align: center;', paste(sort(unique(df$Bettor)), collapse = ", ")),
+      tags$br(),
+      tags$div(
+        class = 'metric-card-container',
+        metric_card(nrow(df), "Completed Bets"),
+        metric_card(paste0(round(100 * win_rate, 1),'%'), 'Win Rate'),
+        metric_card(paste0('$', formatC(total_bet, format = "f", digits = 2, big.mark = ",")), 'Total Bet'),
+        metric_card(paste0('$', formatC(total_payout, format = "f", digits = 2, big.mark = ",")), 'Total Payout'),
+        metric_card(paste0(round(100 * total_return_pct, 1), "%"), 'Total Return')
+      )
     )
   })
 
@@ -807,10 +1071,11 @@ bets_to_write = portfolios_reactive() %>% left_join(results_filtered() %>% selec
     req(bet_summary_filtered())
     
     bet_summary_filtered() %>%
+      filter(!is.na(Result), Result != 'Refund') %>%
       group_by(Bettor, Season, Week) %>%
       summarise(
         Number_Bets_Placed = n(),
-        Pct_Win = ifelse(sum(!is.na(Result)) == 0, NA_real_, mean(Result == 'Win', na.rm = TRUE)),
+        Pct_Win = mean(Result == 'Win', na.rm = TRUE),
         Total_Bet = sum(Amount, na.rm = TRUE),
         Total_Payout = sum(Payout, na.rm = TRUE),
         Total_Return = Total_Payout - Total_Bet,
@@ -824,6 +1089,7 @@ bets_to_write = portfolios_reactive() %>% left_join(results_filtered() %>% selec
     req(bet_summary_filtered())
     
     bet_summary_filtered() %>%
+      filter(!is.na(Result), Result != 'Refund') %>%
       arrange(Week, Label) %>%
       group_by(Season, Week, Label) %>%
       slice(1) %>%
@@ -832,7 +1098,7 @@ bets_to_write = portfolios_reactive() %>% left_join(results_filtered() %>% selec
   
   return_summary = function(df, group_col) {
     df %>%
-      filter(!is.na(Result)) %>%
+      filter(!is.na(Result), Result != 'Refund') %>%
       group_by(.data[[group_col]]) %>%
       summarise(
         Number_Bets_Placed = n(),
@@ -1008,7 +1274,15 @@ bets_to_write = portfolios_reactive() %>% left_join(results_filtered() %>% selec
     
     req(nrow(df) > 0)
     
-    return_bar_plot(df, "Odds_Range", "Return by Odds Range")
+    return_bar_plot(df, "Odds_Range", "Return by Odds Range") %>%
+      layout(
+        xaxis = list(
+          title = "",
+          automargin = TRUE,
+          categoryorder = "array",
+          categoryarray = levels_odds
+        )
+      )
   })
   
   plot_box = function(plot_output_id, height = "400px") {
@@ -1051,54 +1325,93 @@ bets_to_write = portfolios_reactive() %>% left_join(results_filtered() %>% selec
   
   #SURVIVOR DASHBOARD
   
-  current_spread_lines = reactive({
-    spreads = get_spreads()
-    spreads_with_bets = spreads %>% left_join(team_preds %>% filter(response_var == 'team_win') %>% mutate(team = ifelse(team == 'LA','LAR',team)),
-                                              join_by('team')) %>%
-      mutate(match_name = paste(label, 'Moneyline')) %>%
-      left_join(bet_details() %>% filter(str_detect(bet_display_name, 'Moneyline')), join_by('match_name' == 'bet_display_name')) %>%
-      left_join(team_lookup %>% select(TV_abbr, FullName) %>% rename('OppFullName' = 'FullName'), join_by('opponent_team' == 'TV_abbr')) %>%
-      select(label, points, team, opponent_team, OppFullName, Model_Probability, timeslot, game_location, extra_info) %>% arrange(points)
-  })
-  
   output$survivor_filters = renderUI({
+    req(current_spread_lines())
+    req(nrow(current_spread_lines()) > 0)
     choices = team_lookup$TV_abbr
     names(choices) = team_lookup$FullName
     pickerInput('survivor_removal', 'Teams to Exclude', choices, multiple = TRUE)
   })
   
+  output$survivor_week_ui = renderUI({
+    pickerInput('survivor_week', 'Week', choices = sort(unique(current_spread_lines()$week)), selected = latest_week)
+  })
+  
   output$survivor_display = renderUI({
     req(current_spread_lines())
-    
-    if(!is.null(input$survivor_removal))
+    req(input$survivor_week)
+    if(!is.null(current_spread_lines()))
     {
-      lines = current_spread_lines() %>% filter(!(team %in% input$survivor_removal))
-    } else {
-      lines = current_spread_lines()
-    }
-    schedules = load_schedules(latest_season:latest_season) %>% clean_homeaway()
-    
-    spread_html = lapply(seq_len(nrow(lines)), function(b)
-    {
-      bet = lines[b,]
-      upcoming_opponents = schedules %>% mutate(team = ifelse(team == 'LA', 'LAR', team)) %>% filter(team == bet$team, week > latest_week) %>% select(week, opponent, location)
+      if(!is.null(input$survivor_removal))
+      {
+        lines = current_spread_lines() %>% filter(!(team %in% input$survivor_removal), week == input$survivor_week)
+      } else {
+        lines = current_spread_lines() %>% filter(week == input$survivor_week)
+      }
+      schedules = load_schedules(latest_season:latest_season) %>% clean_homeaway()
       
-      HTML(paste0(
-        '<h2>', bet$label, ' (', ifelse(bet$points > 0, '+', ''), bet$points, ' against ', bet$OppFullName, ' - ', ifelse(bet$game_location == 'Neutral', 'Neutral Field', bet$game_location), ')', '</h2>',
-        '<details><summary>View Game Details</summary>', gsub('Odds', 'Moneyline Odds',
-             gsub('<h2>.* Moneyline</h2>', '', bet$extra_info)),
-        '</details>',
-        '<details><summary>View upcoming opponents (<b>home games bold</b>)</summary>',
-        '<p>',paste(sapply(seq_len(nrow(upcoming_opponents)), function(x) ifelse(upcoming_opponents$location[x] == 'home', paste0('<b>',upcoming_opponents$opponent[x],'</b>'), upcoming_opponents$opponent[x])), collapse = ', '), '</p>',
-        '</details><br>'
-      ))
-    })
-    #locally:
-    #htmltools::html_print(htmltools::tagList(spread_html))
+      survivor_future_values_list = get_survivor_future_values(latest_week)
+      survivor_pool_by_week = survivor_future_values_list[[1]] 
+      options_by_team = survivor_future_values_list[[2]] 
+      weeks_with_one_choice = survivor_future_values_list[[3]]
+      weeks_with_two_choices = survivor_future_values_list[[4]]
+      
+      spread_html = lapply(seq_len(nrow(lines)), function(b)
+      {
+        bet = lines[b,]
+        bet_team_fullname = team_lookup$FullName[team_lookup$TV_abbr == bet$team]
+        weekly_table_this_team = survivor_pool_by_week %>% filter(str_detect(Picks, bet_team_fullname)) %>% filter(SafePicks <= ((latest_week-1)*2+1), SafePicks > 1)
+        upcoming_opponents = schedules %>% mutate(team = ifelse(team == 'LA', 'LAR', team)) %>% filter(team == bet$team, week > as.numeric(input$survivor_week)) %>% select(week, opponent, location)
+        single_choice_weeks_this_team = weeks_with_one_choice %>% filter(Picks == bet_team_fullname) %>% pull(Week) %>% sort()
+        #two_choice_weeks_this_team = weeks_with_two_choices %>% filter(Team1 == bet_team_fullname | Team2 == bet_team_fullname)
+        number_of_future_opportunities = options_by_team %>% filter(Pick == bet_team_fullname) %>% pull(num_weeks)
+        if(any(!is.na(bet$extra_info)))
+        {
+          game_details = paste0(
+            '<br><br><details><summary>View Game Details</summary><br>',
+            gsub('Odds', 'Moneyline Odds',
+                 gsub('<h2>.* Moneyline</h2>', '', bet$extra_info)),
+            '</details>')
+          
+        } else {
+          game_details = paste0('<br><br><details><summary>View Game Details</summary>',
+            '<br>Game details will be available at the start of week ', input$survivor_week,
+            '</details>')
+        }
+        
+        HTML(paste0(
+          '<h2>', bet$label, ' (', ifelse(bet$points > 0, '+', ''), bet$points, ' against ', bet$OppFullName, ' - ', ifelse(bet$game_location == 'Neutral', 'Neutral Field', bet$game_location), ')', '</h2>',
+          ifelse(length(single_choice_weeks_this_team) > 0, paste0('<p>Be careful about using this team. As of now, it looks like the only safe pick for week', ifelse(length(single_choice_weeks_this_team) == 1, ' ', 's '), paste(single_choice_weeks_this_team, collapse = ','),'.'),
+                 ifelse(number_of_future_opportunities >= 3, paste0('If you like this pick, be careful -- this is a <b>high-value</b> pick! There are <b>', number_of_future_opportunities, '</b> more potential opportunities to use them later in the season. Check other options before burning one of your slots on this pick.'),
+                        ifelse(number_of_future_opportunities == 2,  paste('If you are a very confident in this pick, then it is a pretty good time to use it. There are approximately<b>2</b> more potential opportunities to use them later in the season.'),
+                               ifelse(number_of_future_opportunities == 1,  paste('If you are a very confident in this pick, then it is a pretty good time to use it. There is potentially only <b>one more opportunity</b> to use them later.'),
+                                      'If you like this pick, this is the best time to use this one. There do not seem to be any more good opportunities to use them again.')))),
+          game_details,
+          '<br><details><summary>View upcoming opponents (<b>home games bold</b>)</summary>',
+          '<p>',paste(sapply(seq_len(nrow(upcoming_opponents)), function(x) ifelse(upcoming_opponents$location[x] == 'home', paste0('<b>',upcoming_opponents$opponent[x],'</b>'), upcoming_opponents$opponent[x])), collapse = ', '), '</p>',
+          '</details>',
+          '<br><details><summary>Have multiple slots and need help choosing which one to use for this team?</summary>',
+          ifelse(nrow(weekly_table_this_team) == 0, '<br>There are no major future conflicts to worry about with this team at this time.',
+                 paste('<br>In the future, this team will be faced with a difficult week where there are <b>not many other good choices</b>. Avoid choosing this team for an entry that already has many of the following picks for any of these upcoming weeks:<br>',
+                       paste0('<ul>',sapply(1:nrow(weekly_table_this_team), function(x){
+                         paste0('<li>',gsub(',', ', ', gsub(', |,$|^,', '', gsub(',,', ',', gsub(bet_team_fullname, '', weekly_table_this_team$Picks[x])))), ' (Conflict in week ', weekly_table_this_team$Week[x], ')</li>')
+                       }), '</ul>', collapse = '')
+                 )
+          ),
+          ' </details><br><br>'
+        ))
+          
+        
+      })
+      #locally:
+      #htmltools::html_print(htmltools::tagList(spread_html))
+      
+      return(htmltools::tagList(spread_html))
+    } else {
+      return(HTML('<p>Click the load bet recommendations button to pull DraftKings spreads.</p>'))
+    }
     
-    htmltools::tagList(spread_html)
-    
-    
+      
   })
 
 }

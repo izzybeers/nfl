@@ -24,7 +24,7 @@ get_player_info = function(min_year, max_year, schedules_raw)
   week_dates = get_week_end_dates(schedules_raw)
   if ('season' %in% colnames(depth_charts_raw))
   {
-    depth_charts = load_depth_charts(min_year:max_year) %>%
+    depth_charts = depth_charts_raw %>%
       mutate(season = case_when(
         !is.na(season) ~ season,
         month(dt) %in% c(3,4,5,6,7,8,9,10,11,12) ~ year(dt),
@@ -34,12 +34,14 @@ get_player_info = function(min_year, max_year, schedules_raw)
         team = ifelse(is.na(team), club_code, team),
         depth_rank = ifelse(!is.na(depth_team), depth_team, pos_rank)) %>%
       left_join(week_dates, join_by('season', 'dt' <= 'week_end', 'dt' >= 'week_start', 'team')) %>%
+      left_join(player_bios %>% select(gsis_id, player_position = position), by = "gsis_id") %>%
+      filter(depth_position == player_position | pos_abb == player_position) %>%
       mutate(week = ifelse(is.na(week.x), week.y, week.x)) %>%
       filter(!is.na(week) & !is.na(depth_rank)) %>%
       group_by(gsis_id, season, week) %>% arrange(desc(dt)) %>% slice(1) %>% ungroup() %>% #get the latest depth chart info for a player in a week
       select(gsis_id, team, season, week, depth_rank) 
   } else {
-    depth_charts = load_depth_charts(min_year:max_year) %>%
+    depth_charts = depth_charts_raw %>%
       mutate(season = case_when(
         month(dt) %in% c(3,4,5,6,7,8,9,10,11,12) ~ year(dt),
         month(dt) %in% c(1,2) ~ year(dt) - 1,
@@ -48,6 +50,8 @@ get_player_info = function(min_year, max_year, schedules_raw)
         team = ifelse(is.na(team), club_code, team),
         depth_rank = pos_rank) %>%
       left_join(week_dates, join_by('season', 'dt' <= 'week_end', 'dt' >= 'week_start', 'team')) %>%
+      left_join(player_bios %>% select(gsis_id, player_position = position), by = "gsis_id") %>%
+      filter(depth_position == player_position) %>%
       filter(!is.na(week) & !is.na(depth_rank)) %>%
       group_by(gsis_id, season, week) %>% arrange(desc(dt)) %>% slice(1) %>% ungroup() %>% #get the latest depth chart info for a player in a week
       select(gsis_id, team, season, week, depth_rank) 
@@ -481,7 +485,7 @@ pull_all_player_stats = function(min_year, max_year, team_redzone_drives, test_m
   player_bios = player_info[[3]]
   time_spent_with_team = player_info[[4]]
   depth_charts = player_info[[5]]
-  
+ 
   if (test_mode)
   {
     time_spent_with_team = time_spent_with_team %>% filter(!(season == max_year & week > wk))
@@ -539,9 +543,9 @@ pull_all_player_stats = function(min_year, max_year, team_redzone_drives, test_m
     
     if (!test_mode)
     { 
-      upsert_to_supabase('MainData', 'OffensePlayerStats', offense_and_snaps_data_past_week %>% mutate(updated_at = Sys.time() %>% select(any_of(colnames(existing_offense_stats)))),
+      upsert_to_supabase('MainData', 'OffensePlayerStats', offense_and_snaps_data_past_week %>% mutate(updated_at = Sys.time()) %>% select(any_of(colnames(existing_offense_stats))),
                          c('gsis_id', 'season', 'week')) 
-      upsert_to_supabase('MainData', 'DefensePlayerStats', defense_data_past_week %>% mutate(updated_at = Sys.time() %>% select(any_of(colnames(existing_defense_stats)))),
+      upsert_to_supabase('MainData', 'DefensePlayerStats', defense_data_past_week %>% mutate(updated_at = Sys.time()) %>% select(any_of(colnames(existing_defense_stats))),
                          c('player_id', 'season', 'week')) 
     }
     

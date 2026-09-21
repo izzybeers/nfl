@@ -1,7 +1,9 @@
-library(slider)
-library(dplyr)
-library(nflreadr)
-library(jsonlite)
+suppressPackageStartupMessages({
+  library(slider)
+  library(dplyr)
+  library(nflreadr)
+  library(jsonlite)
+})
 
 
 compute_slider_cumulatives = function(df, cols_to_include, cumulative_only) {
@@ -43,28 +45,45 @@ compute_slider_cumulatives = function(df, cols_to_include, cumulative_only) {
 SUPABASE_URL <- "https://tvvhvzodwrbkgdpzzrxq.supabase.co"
 SUPABASE_KEY <- "sb_publishable_K2dD8bfEwXpx0koy8t4tLA_mZ5BJN_Z"
 
-get_supabase_data <- function(schema, table_name, additional_sql = list(), select = "*")
+
+get_supabase_data = function(schema, table_name, additional_sql = list(),
+                             select = "*", page_size = 500, order_by = NULL)
 {
-  url <- paste0(SUPABASE_URL, "/rest/v1/", table_name)
+  url = paste0(SUPABASE_URL, "/rest/v1/", table_name)
+  all_data = list()
+  offset = 0
   
-  response <- GET(
-    url,
-    query = c(
-      list(select = select),
-      additional_sql
-    ),
-    add_headers(
-      "apikey" = SUPABASE_KEY,
-      "Authorization" = paste("Bearer", SUPABASE_KEY),
-      "Accept-Profile" = schema
-    )
-  )
-  
-  if (http_error(response)) {
-    stop(content(response, "text", encoding = "UTF-8"))
+  repeat {
+    query_params = c(list(select = select, limit = page_size, offset = offset), additional_sql)
+    
+    if (!is.null(order_by))
+    {
+      query_params$order = order_by
+    }
+    
+    response = GET(url, query = query_params,
+                   add_headers("apikey" = SUPABASE_KEY, "Authorization" = paste("Bearer", SUPABASE_KEY), "Accept-Profile" = schema))
+    
+    if (http_error(response)) {
+      stop(content(response, "text", encoding = "UTF-8"))
+    }
+    
+    this_data = fromJSON(content(response, "text", encoding = "UTF-8"))
+    
+    if (length(all_data) == 0 && !is.null(this_data) && length(this_data) == 0) {
+      return(NULL)
+    }
+    
+    all_data[[length(all_data) + 1]] = this_data
+    
+    if (nrow(this_data) < page_size) {
+      break
+    }
+    
+    offset = offset + page_size
   }
   
-  fromJSON(content(response, "text", encoding = "UTF-8"))
+  return(bind_rows(all_data))
 }
 
 write_to_supabase = function(schema, table_name, df, batch_size = 500)
@@ -210,7 +229,7 @@ remove_uninformative_stats = function(df, column_list, missing_threshold)
 
 
 #data:
-get_schedules = function(min_year, max_year)
+get_schedules = function(min_year, max_year = year(Sys.Date()))
 {
   return(load_schedules(min_year:max_year) %>% clean_homeaway())
 }
