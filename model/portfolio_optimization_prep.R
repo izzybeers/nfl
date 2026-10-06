@@ -17,6 +17,14 @@ gamelogs = load_player_stats(seasons = min_year:max_year) %>%
                                       team_win = as.numeric(team_score > opponent_score)) %>% select(season, week, team, team_win, team_diff), join_by('team','season','week')) %>%
   inner_join(load_players() %>% filter(position_group %in% c('QB', 'RB', 'WR', 'TE')) %>% select(gsis_id, position_group) %>% distinct(), join_by('label' == 'gsis_id'))
 
+gamelogs$team_diff_neg2 = gamelogs$team_diff > -2.5
+gamelogs$team_diff_neg3 = gamelogs$team_diff > -3.5
+gamelogs$team_diff_neg6 = gamelogs$team_diff > -6.5
+gamelogs$team_diff_neg7 = gamelogs$team_diff > -7.5
+gamelogs$team_diff_pos2 = gamelogs$team_diff > 2.5
+gamelogs$team_diff_pos3 = gamelogs$team_diff > 3.5
+gamelogs$team_diff_pos6 = gamelogs$team_diff > 6.5
+gamelogs$team_diff_pos7 = gamelogs$team_diff > 7.5
 
 #quarterbacks:
 qbs_passing = gamelogs %>% filter(!is.na(passing_yards) & position_group == "QB") %>% select(label, team, opponent, season, week, passing_yards)
@@ -50,7 +58,14 @@ rb_td = gamelogs %>% filter(!is.na(anytime_td_scorer) & str_detect(position_grou
 #team:
 
 team_win = gamelogs %>% select(season, week, team, opponent, team_win) %>% distinct() %>% mutate(label = team)
-team_diff = gamelogs %>% select(season, week, team, opponent, team_diff) %>% distinct() %>% mutate(label = team)
+team_diff_neg2 = gamelogs %>% select(season, week, team, opponent, team_diff_neg2) %>% distinct() %>% mutate(label = team)
+team_diff_neg3 = gamelogs %>% select(season, week, team, opponent, team_diff_neg3) %>% distinct() %>% mutate(label = team)
+team_diff_neg6 = gamelogs %>% select(season, week, team, opponent, team_diff_neg6) %>% distinct() %>% mutate(label = team)
+team_diff_neg7 = gamelogs %>% select(season, week, team, opponent, team_diff_neg7) %>% distinct() %>% mutate(label = team)
+team_diff_pos2 = gamelogs %>% select(season, week, team, opponent, team_diff_pos2) %>% distinct() %>% mutate(label = team)
+team_diff_pos3 = gamelogs %>% select(season, week, team, opponent, team_diff_pos3) %>% distinct() %>% mutate(label = team)
+team_diff_pos6 = gamelogs %>% select(season, week, team, opponent, team_diff_pos6) %>% distinct() %>% mutate(label = team)
+team_diff_pos7 = gamelogs %>% select(season, week, team, opponent, team_diff_pos7) %>% distinct() %>% mutate(label = team)
 
 get_corr = function(df1, df2, var1, var2, scope1, scope2, same_team = TRUE, same_player = FALSE)
 {
@@ -59,9 +74,11 @@ get_corr = function(df1, df2, var1, var2, scope1, scope2, same_team = TRUE, same
     var1 = paste0(var1, '.x')
     var2 = paste0(var2, '.y')
   }
-  if(same_team == TRUE & same_player == FALSE)
+  if(same_team == TRUE & same_player == FALSE & scope1 != 'Team')
   {
     cor = df1 %>% inner_join(df2, join_by(season, week, team, opponent)) %>% filter(label.x != label.y) %>% select(-label.x, -label.y) %>% summarise(cor = stats::cor(.data[[var1]], .data[[var2]], use = 'pairwise.complete.obs')) %>% pull()
+  } else if(same_team == TRUE & same_player == FALSE) {
+    cor = df1 %>% inner_join(df2, join_by(season, week, team, opponent)) %>% select(-label.x, -label.y) %>% summarise(cor = stats::cor(.data[[var1]], .data[[var2]], use = 'pairwise.complete.obs')) %>% pull()
   } else if (same_player == TRUE) {
     cor = df1 %>% inner_join(df2, join_by(season, week, label)) %>% summarise(cor = stats::cor(.data[[var1]], .data[[var2]], use = 'pairwise.complete.obs')) %>% pull()
   } else {
@@ -91,7 +108,14 @@ scenarios = list(
   rb_td      = list(df = rb_td, var = "anytime_td_scorer", group = "RB", scope = 'Player'),
   
   team_win = list(df = team_win, var = 'team_win', group = 'Team', scope = 'Team'),
-  team_diff = list(df = team_diff, var = 'team_diff', group = 'Team', scope = 'Team')
+  team_diff_neg2 = list(df = team_diff_neg2, var = 'team_diff_neg2', group = 'Team', scope = 'Team'),
+  team_diff_neg3 = list(df = team_diff_neg3, var = 'team_diff_neg3', group = 'Team', scope = 'Team'),
+  team_diff_neg6 = list(df = team_diff_neg6, var = 'team_diff_neg6', group = 'Team', scope = 'Team'),
+  team_diff_neg7 = list(df = team_diff_neg7, var = 'team_diff_neg7', group = 'Team', scope = 'Team'),
+  team_diff_pos2 = list(df = team_diff_pos2, var = 'team_diff_pos2', group = 'Team', scope = 'Team'),
+  team_diff_pos3 = list(df = team_diff_pos3, var = 'team_diff_pos3', group = 'Team', scope = 'Team'),
+  team_diff_pos6 = list(df = team_diff_pos6, var = 'team_diff_pos6', group = 'Team', scope = 'Team'),
+  team_diff_pos7 = list(df = team_diff_pos7, var = 'team_diff_pos7', group = 'Team', scope = 'Team')
 )
 
 # build a named list of correlations (same-team and opp-team), skipping QB–QB
@@ -111,9 +135,38 @@ for (i in names(scenarios)) {
     scope1 = scenarios[[i]]$scope
     scope2 = scenarios[[j]]$scope
     symmetrical =  var1 == var2 & group1 == group2
-    
-    # for QB-QB combos, skip the scenario where they're on the same team because 2 QBs wouldn't be playing in the same game on the same team unless injury. opposing team correlations are fine.
-    if (!(group1 == "QB" && group2 == "QB") && !(scope1 == 'Team' && scope2 == 'Team'))
+    if (scope1 == 'Team' && scope2 == 'Team')
+    {
+      r_same = get_corr(
+        df1 = df1, df2 = df2,
+        var1 = var1, var2 = var2,
+        scope1 = scope1, scope2 = scope2,
+        same_team = TRUE
+      )
+      
+      r_opp = get_corr(
+        df1 = df1, df2 = df2,
+        var1 = var1, var2 = var2,
+        scope1 = scope1, scope2 = scope2,
+        same_team = FALSE
+      )
+      
+      corrs = rbind(
+        corrs,
+        c(group1, var1, group2, var2, 'same_team', r_same),
+        c(group1, var1, group2, var2, 'opp_team', r_opp)
+      )
+      if(!symmetrical)
+      {
+        corrs = rbind(
+          corrs,
+          c(group1, var1, group2, var2, 'same_team', r_same),
+          c(group1, var1, group2, var2, 'opp_team', r_opp)
+        )
+      }
+    } else {
+      
+    if (!(group1 == "QB" && group2 == "QB") && !(scope1 == 'Team' && scope2 == 'Team')) # for QB-QB combos, skip the scenario where they're on the same team because 2 QBs wouldn't be playing in the same game on the same team unless injury. opposing team correlations are fine.
     {
       r_same = get_corr(df1  = df1, df2  = df2, var1 = var1, var2 = var2, scope1 = scope1, scope2 = scope2, same_team = TRUE)
       
@@ -134,7 +187,7 @@ for (i in names(scenarios)) {
       }
     }
     
-    r_opp = get_corr(df1  = df1, df2  = df2, var1 = var1, var2 = var2, same_team = FALSE)
+    r_opp = get_corr(df1  = df1, df2  = df2, var1 = var1, var2 = var2, scope1 = scope1, scope2 = scope2,  same_team = FALSE)
     
     if(abs(r_opp) >= 0.05)
     {
@@ -148,10 +201,9 @@ for (i in names(scenarios)) {
                         c(group2, var2, group1, var1, 'opp_team', r_opp)
                     )
       }
-    }
-    if(var1 != var2 && group1 == group2 && !(scope1 == 'Team' & scope2 == 'Team'))
+    } else if (var1 != var2 && group1 == group2 && !(scope1 == 'Team' & scope2 == 'Team'))
     {
-      r_same_player = get_corr(df1  = df1, df2  = df2, var1 = var1, var2 = var2, same_team = TRUE, same_player = TRUE)
+      r_same_player = get_corr(df1  = df1, df2  = df2, var1 = var1, var2 = var2, scope1 = scope1, scope2 = scope2,  same_team = TRUE, same_player = TRUE)
       
       if(abs(r_same_player) >= 0.05)
       {
@@ -159,11 +211,12 @@ for (i in names(scenarios)) {
                       c(group1, var1, group2, var2, 'same_player', r_same_player)
                       )
         
-        if(!symmetrical)
-        {
+          if(!symmetrical)
+          {
           corrs = rbind(corrs,
                         c(group2, var2, group1, var1, 'same_player', r_same_player)
                         )
+          }
         }
       }
     }

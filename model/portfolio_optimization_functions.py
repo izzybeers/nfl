@@ -108,14 +108,29 @@ def get_mu_sigma(df_this_week, correlations, verbose = False):
             #if player is the same: correlation = 1
             #if player fits in one of the correlation categories, assign the correct correlation based on the correlations spreadsheet
             #otherwise, correlation = 0
-                if (df_this_week['label'].iloc[i] == df_this_week['label'].iloc[j]) & (df_this_week['Type'].iloc[i] == df_this_week['Type'].iloc[j]):
+                type_i = df_this_week['Type'].iloc[i]
+                type_j = df_this_week['Type'].iloc[j]
+                if (type_i == 'team_differential'):
+                    if ('minus' in df_this_week['response_var'].iloc[i]):
+                        type_i = df_this_week['response_var'].iloc[i].replace('differential_minus', 'diff_neg').replace('.5', '')
+                    else:
+                        type_i = df_this_week['response_var'].iloc[i].replace('differential_', 'diff_pos').replace('.5', '')
+                if (type_j == 'team_differential'):
+                    if ('minus' in df_this_week['response_var'].iloc[j]):
+                        type_j = df_this_week['response_var'].iloc[j].replace('differential_minus', 'diff_neg').replace('.5', '')
+                    else:
+                        type_j = df_this_week['response_var'].iloc[j].replace('differential_', 'diff_pos').replace('.5', '')
+
+                if (df_this_week['label'].iloc[i] == df_this_week['label'].iloc[j]) & (type_i == type_j):
                     cor = 1
                 #same player, different bet type:
-                elif (df_this_week['label'].iloc[i] == df_this_week['label'].iloc[j]) & (df_this_week['Type'].iloc[i] != df_this_week['Type'].iloc[j]):
-                    type_i = df_this_week['Type'].iloc[i]
-                    type_j = df_this_week['Type'].iloc[j]
+                elif (df_this_week['label'].iloc[i] == df_this_week['label'].iloc[j]) & (type_i != type_j):
+                    if (df_this_week['Position'].iloc[i] == 'Team') or (df_this_week['Position'].iloc[j]=='Team'):
+                        corr_comparison_to_check = 'same_team' 
+                    else:
+                        corr_comparison_to_check = 'same_player'
                     sub = correlations[
-                        (correlations['Correlation_Type'] == 'same_player') &
+                        (correlations['Correlation_Type'] == corr_comparison_to_check) &
                         (
                             ((correlations['Var1'] == type_i) & (correlations['Var2'] == type_j)) |
                             ((correlations['Var1'] == type_j) & (correlations['Var2'] == type_i))
@@ -127,16 +142,30 @@ def get_mu_sigma(df_this_week, correlations, verbose = False):
                     pos_i = str(df_this_week['Position'].iloc[i])
                     pos_j = str(df_this_week['Position'].iloc[j])
                     sub = correlations[
-                        (correlations['Correlation_Type'] == 'same_team') &
-                        (correlations['Var1'] == df_this_week['Type'].iloc[i]) &
-                        (correlations['Var2'] == df_this_week['Type'].iloc[j])
-                    ]
+                            (correlations['Correlation_Type'] == 'same_team') &
+                            (
+                                ((correlations['Var1'] == type_i) & (correlations['Var2'] == type_j)) |
+                                ((correlations['Var1'] == type_j) & (correlations['Var2'] == type_i))
+                            )
+                        ]
+
                     if not sub.empty and {'Position1', 'Position2'}.issubset(sub.columns):
                         sub = sub[
                             sub.apply(
                                 lambda row:
-                                    (pd.isna(row['Position1']) or pos_i in str(row['Position1'])) and
-                                    (pd.isna(row['Position2']) or pos_j in str(row['Position2'])),
+                                    (
+                                        row['Var1'] == type_i
+                                        and row['Var2'] == type_j
+                                        and (pd.isna(row['Position1']) or pos_i in str(row['Position1']))
+                                        and (pd.isna(row['Position2']) or pos_j in str(row['Position2']))
+                                    )
+                                    or
+                                    (
+                                        row['Var1'] == type_j
+                                        and row['Var2'] == type_i
+                                        and (pd.isna(row['Position1']) or pos_j in str(row['Position1']))
+                                        and (pd.isna(row['Position2']) or pos_i in str(row['Position2']))
+                                    ),
                                 axis=1
                             )
                         ]
@@ -146,16 +175,30 @@ def get_mu_sigma(df_this_week, correlations, verbose = False):
                     pos_i = str(df_this_week['Position'].iloc[i])
                     pos_j = str(df_this_week['Position'].iloc[j])
                     sub = correlations[
-                        (correlations['Correlation_Type'] == 'opp_team') &
-                        (correlations['Var1'] == df_this_week['Type'].iloc[i]) &
-                        (correlations['Var2'] == df_this_week['Type'].iloc[j])
-                    ]
+                            (correlations['Correlation_Type'] == 'opp_team') &
+                            (
+                                ((correlations['Var1'] == type_i) & (correlations['Var2'] == type_j)) |
+                                ((correlations['Var1'] == type_j) & (correlations['Var2'] == type_i))
+                            )
+                        ]
+
                     if not sub.empty and {'Position1', 'Position2'}.issubset(sub.columns):
                         sub = sub[
                             sub.apply(
                                 lambda row:
-                                    (pd.isna(row['Position1']) or pos_i in str(row['Position1'])) and
-                                    (pd.isna(row['Position2']) or pos_j in str(row['Position2'])),
+                                    (
+                                        row['Var1'] == type_i
+                                        and row['Var2'] == type_j
+                                        and (pd.isna(row['Position1']) or pos_i in str(row['Position1']))
+                                        and (pd.isna(row['Position2']) or pos_j in str(row['Position2']))
+                                    )
+                                    or
+                                    (
+                                        row['Var1'] == type_j
+                                        and row['Var2'] == type_i
+                                        and (pd.isna(row['Position1']) or pos_j in str(row['Position1']))
+                                        and (pd.isna(row['Position2']) or pos_i in str(row['Position2']))
+                                    ),
                                 axis=1
                             )
                         ]
