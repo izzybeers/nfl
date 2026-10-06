@@ -509,7 +509,7 @@ server = function(input, output, session) {
         write_to_supabase('betting', 'BetRecommendations',
                           results %>%
                             mutate(Week = latest_week, Season = latest_season) %>%
-                            select(-Payout_10_Dollar_Bet, -expected_return) %>%
+                            select(-Payout_10_Dollar_Bet) %>%
                             rename('BettingOn' = 'label',
                                    'Bet_Type' = 'bet_type',
                                    'Label' = 'bet_display_name',
@@ -538,7 +538,7 @@ server = function(input, output, session) {
       select(bet_display_name, Position, team, opponent_team, game_location, timeslot, Odds, Model_Probability, Betting_Line_Implied_Prob, Payout_10_Dollar_Bet, expected_weighted_roi, Risk_Score) %>%
         datatable(options = list(dom = 'ftp'), rownames = FALSE) %>%
       formatPercentage(c('Model_Probability', 'Betting_Line_Implied_Prob', 'expected_weighted_roi'), digits = 1)
-  })
+  }, server = FALSE)
   
   output$popup_portfolio_button_ui = renderUI({
     req(results_filtered())
@@ -688,7 +688,7 @@ observeEvent(input$generate_portfolio, {
                                                            pageLength = nrow(portfolio_table_to_show())), rownames = FALSE, selection = 'single') %>%
       formatCurrency(c('bet_amount', 'ToPay'), digits = 2) %>%
       formatPercentage(c('Model_Probability', 'Betting_Line_Implied_Prob'), digits = 1)
-  })
+  }, server = FALSE)
   
   output$button_log_portfolio_ui = renderUI({
     req(portfolios_reactive())

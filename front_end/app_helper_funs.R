@@ -177,6 +177,27 @@ upsert_to_supabase = function(schema, table_name, df, conflict_cols)
   }
 }
 
+get_week_end_dates = function(schedules_raw)
+{
+  week_end_dates_by_team = schedules_raw %>% group_by(season, week, team) %>% summarise(week_end = max(paste(gameday, gametime)), .groups = 'drop')
+  previous_game_info = week_end_dates_by_team %>% 
+    ungroup() %>% 
+    group_by(season, team) %>% 
+    arrange(week) %>%
+    mutate(previous_game_end = lag(week_end)) %>% 
+    ungroup() %>% select(-week_end)
+  
+  week_dates = week_end_dates_by_team %>% 
+    left_join(previous_game_info, join_by('season', 'team', 'week')) %>%
+    mutate(
+      week_start = case_when(
+        is.na(previous_game_end) ~ as.POSIXct(paste0(season, '-07-01 00:00:00')),
+        TRUE ~ as.POSIXct(previous_game_end) + 1
+      ),
+      week_end = as.POSIXct(week_end)
+    ) %>% select(-previous_game_end)
+}
+
 
 clean_names = function(name)
 {
