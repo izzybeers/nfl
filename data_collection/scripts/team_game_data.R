@@ -24,7 +24,6 @@ get_team_data = function(min_year, max_year, schedules_df, team_lookup_df, wk = 
    rename(opponent_team = opponent)
   
   
- 
   orig_teamgl = load_team_stats(seasons = min_year:(ifelse(!is.null(wk)&&wk==1, (max_year-1), max_year))) %>% select(season, week, team, 
                                                                    completions, attempts, passing_yards, passing_tds, passing_interceptions, sacks_suffered, sack_yards_lost, sack_fumbles, sack_fumbles_lost, passing_air_yards, passing_yards_after_catch, passing_first_downs, passing_2pt_conversions, 
                                                                    carries, rushing_yards, rushing_tds, rushing_fumbles, rushing_fumbles_lost, rushing_first_downs, rushing_2pt_conversions,
@@ -40,7 +39,7 @@ get_team_data = function(min_year, max_year, schedules_df, team_lookup_df, wk = 
   
   if(!is.null(wk))
   {
-    upcoming_week_schedule = schedules %>% filter(season == max_year & week == wk) %>% select(
+    upcoming_week_schedule = schedules %>% filter(season == max_year & week == wk & is.na(team_score)) %>% select(
       season, week, team, opponent_team,
       game_id,
       home_stadium,
