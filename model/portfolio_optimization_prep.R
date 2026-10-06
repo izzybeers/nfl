@@ -160,8 +160,8 @@ for (i in names(scenarios)) {
       {
         corrs = rbind(
           corrs,
-          c(group1, var1, group2, var2, 'same_team', r_same),
-          c(group1, var1, group2, var2, 'opp_team', r_opp)
+          c(group1, var2, group2, var1, 'same_team', r_same),
+          c(group1, var2, group2, var1, 'opp_team', r_opp)
         )
       }
     } else {
